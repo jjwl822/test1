@@ -41,7 +41,42 @@ data class Conversation(
 }
 
 @Serializable
+data class Reactions(
+    val heart: Int = 0,
+    val like: Int = 0,
+    val dislike: Int = 0,
+)
+
+@Serializable
+data class Post(
+    val id: Long,
+    val authorId: Long,
+    val authorName: String,
+    val text: String,
+    val imageUrl: String? = null,
+    val createdAt: Long,
+    val commentCount: Int,
+    val reactions: Reactions,
+    val myReactions: List<String>,
+)
+
+@Serializable
+data class Comment(
+    val id: Long,
+    val postId: Long,
+    val authorId: Long,
+    val authorName: String,
+    val text: String,
+    val createdAt: Long,
+)
+
+@Serializable
 data class SocketEvent(
     val type: String,
     val message: Message? = null,
+    val postId: Long? = null,
+    val authorId: Long? = null,
+    val authorName: String? = null,
+    val postAuthorId: Long? = null,
+    val comment: Comment? = null,
 )

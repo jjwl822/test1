@@ -1,5 +1,6 @@
 package com.family.messenger.data
 
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -8,6 +9,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -17,7 +19,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-class ApiException(message: String) : Exception(message)
+class ApiException(message: String, val code: Int = 0) : Exception(message)
 
 class Api(private val session: Session) {
 
@@ -86,6 +88,43 @@ class Api(private val session: Session) {
                 .build(),
         )
 
+    suspend fun posts(before: Long? = null): List<Post> {
+        val query = if (before != null) "?before=$before" else ""
+        return call(Request.Builder().url(url("/api/posts$query")).build())
+    }
+
+    suspend fun post(id: Long): Post = call(Request.Builder().url(url("/api/posts/$id")).build())
+
+    suspend fun createPost(text: String, jpeg: ByteArray?): Post {
+        val body = buildJsonObject {
+            put("text", text)
+            if (jpeg != null) {
+                putJsonObject("image") {
+                    put("type", "image/jpeg")
+                    put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP))
+                }
+            }
+        }
+        return call(post(url("/api/posts"), body))
+    }
+
+    suspend fun deletePost(id: Long) {
+        call<JsonObject>(Request.Builder().url(url("/api/posts/$id")).delete().build())
+    }
+
+    suspend fun react(postId: Long, kind: String): Post =
+        call(post(url("/api/posts/$postId/reactions"), buildJsonObject { put("kind", kind) }))
+
+    suspend fun comments(postId: Long): List<Comment> =
+        call(Request.Builder().url(url("/api/posts/$postId/comments")).build())
+
+    suspend fun addComment(postId: Long, text: String): Comment =
+        call(post(url("/api/posts/$postId/comments"), buildJsonObject { put("text", text) }))
+
+    suspend fun deleteComment(id: Long) {
+        call<JsonObject>(Request.Builder().url(url("/api/comments/$id")).delete().build())
+    }
+
     /** Turns a server-relative path such as /api/images/x.jpg into a full URL. */
     fun url(path: String): String {
         val base = session.auth.value?.serverUrl ?: throw ApiException("로그인이 필요합니다.")
@@ -113,7 +152,7 @@ class Api(private val session: Session) {
                 }
                 val error = runCatching { json.parseToJsonElement(text) as JsonObject }
                     .getOrNull()?.get("error")?.jsonPrimitive?.content
-                throw ApiException(error ?: "요청에 실패했습니다. (${it.code})")
+                throw ApiException(error ?: "요청에 실패했습니다. (${it.code})", it.code)
             }
             json.decodeFromString<T>(text)
         }

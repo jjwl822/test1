@@ -73,7 +73,9 @@ fun ChatScreen(app: FamilyApp, conversationId: String, title: String, me: User, 
     DisposableEffect(conversationId) {
         MessageBus.activeConversation.value = conversationId
         Notifications.cancel(app, conversationId)
-        onDispose { MessageBus.activeConversation.value = null }
+        onDispose {
+            if (MessageBus.activeConversation.value == conversationId) MessageBus.activeConversation.value = null
+        }
     }
 
     val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->

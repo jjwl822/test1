@@ -31,6 +31,31 @@ export function openDatabase(file) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id);
+
+    CREATE TABLE IF NOT EXISTS posts (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      author_id  INTEGER NOT NULL REFERENCES users(id),
+      text       TEXT NOT NULL DEFAULT '',
+      image      TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS comments (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_id    INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      author_id  INTEGER NOT NULL REFERENCES users(id),
+      text       TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id, id);
+
+    CREATE TABLE IF NOT EXISTS reactions (
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      kind    TEXT NOT NULL CHECK (kind IN ('heart', 'like', 'dislike')),
+      PRIMARY KEY (post_id, user_id, kind)
+    );
   `);
   return db;
 }

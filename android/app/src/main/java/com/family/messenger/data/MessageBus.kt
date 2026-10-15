@@ -11,6 +11,11 @@ object MessageBus {
     /** True while the real-time connection is open. Screens reload when it reconnects. */
     val connected = MutableStateFlow(false)
 
-    /** Conversation currently on screen; no notification is shown for it. */
+    /** Id of a story post that was added, changed or deleted. */
+    val feedChanges = MutableSharedFlow<Long>(extraBufferCapacity = 64)
+
+    /** Conversation currently on screen (or [FEED] for the story tab); no notification is shown for it. */
     val activeConversation = MutableStateFlow<String?>(null)
+
+    const val FEED = "feed"
 }

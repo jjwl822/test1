@@ -88,3 +88,68 @@ test('full messaging flow', async () => {
   await call('POST', '/api/logout', { token: kid.token });
   assert.equal((await call('GET', '/api/me', { token: kid.token })).status, 401);
 });
+
+test('story feed', async () => {
+  const login = (u) => call('POST', '/api/login', { json: { username: u, password: 'pass1234' } }).then((r) => r.data);
+  const mom = await login('mom');
+  const dad = await login('dad');
+
+  assert.equal((await call('POST', '/api/posts', { token: mom.token, json: {} })).status, 400);
+  const png = Buffer.from('89504e470d0a1a0a', 'hex').toString('base64');
+
+  const ws = new WebSocket(`${base.replace('http', 'ws')}/ws`, { headers: { authorization: `Bearer ${dad.token}` } });
+  const events = [];
+  ws.on('message', (d) => events.push(JSON.parse(d)));
+  await new Promise((r) => ws.on('open', r));
+
+  const created = await call('POST', '/api/posts', {
+    token: mom.token,
+    json: { text: '오늘 소풍!', image: { type: 'image/png', data: png } },
+  });
+  assert.equal(created.status, 201);
+  const post = created.data;
+  assert.equal(post.authorName, '엄마');
+  assert.deepEqual(post.reactions, { heart: 0, like: 0, dislike: 0 });
+  // Story photos are visible to every family member
+  assert.equal((await call('GET', post.imageUrl, { token: dad.token })).status, 200);
+  assert.equal((await call('POST', '/api/posts', { token: dad.token, json: { text: '글만 올리기' } })).status, 201);
+
+  const feed = (await call('GET', '/api/posts', { token: dad.token })).data;
+  assert.deepEqual(feed.map((p) => p.text), ['글만 올리기', '오늘 소풍!']);
+
+  // Reactions: heart independent, like/dislike exclusive, second press undoes
+  const react = (kind) => call('POST', `/api/posts/${post.id}/reactions`, { token: dad.token, json: { kind } }).then((r) => r.data);
+  await react('heart');
+  await react('like');
+  let p = await react('dislike');
+  assert.deepEqual(p.reactions, { heart: 1, like: 0, dislike: 1 });
+  assert.deepEqual(p.myReactions.sort(), ['dislike', 'heart']);
+  p = await react('heart');
+  assert.equal(p.reactions.heart, 0);
+  assert.equal((await call('POST', `/api/posts/${post.id}/reactions`, { token: dad.token, json: { kind: 'wow' } })).status, 400);
+  // Viewer-specific state
+  const momView = (await call('GET', `/api/posts/${post.id}`, { token: mom.token })).data;
+  assert.deepEqual(momView.myReactions, []);
+
+  // Comments
+  const c = await call('POST', `/api/posts/${post.id}/comments`, { token: dad.token, json: { text: '멋지다' } });
+  assert.equal(c.status, 201);
+  const comments = (await call('GET', `/api/posts/${post.id}/comments`, { token: mom.token })).data;
+  assert.equal(comments[0].authorName, '아빠');
+  assert.equal((await call('GET', `/api/posts/${post.id}`, { token: mom.token })).data.commentCount, 1);
+  assert.equal((await call('DELETE', `/api/comments/${c.data.id}`, { token: mom.token })).status, 403);
+  assert.equal((await call('DELETE', `/api/comments/${c.data.id}`, { token: dad.token })).status, 200);
+
+  // Only the author can delete; deleting removes the photo
+  assert.equal((await call('DELETE', `/api/posts/${post.id}`, { token: dad.token })).status, 403);
+  assert.equal((await call('DELETE', `/api/posts/${post.id}`, { token: mom.token })).status, 200);
+  assert.equal((await call('GET', `/api/posts/${post.id}`, { token: mom.token })).status, 404);
+  assert.equal((await call('GET', post.imageUrl, { token: dad.token })).status, 404);
+
+  await new Promise((r) => setTimeout(r, 50));
+  ws.close();
+  const types = events.map((e) => e.type);
+  assert.ok(types.includes('post'));
+  assert.ok(types.includes('comment'));
+  assert.ok(types.includes('feed'));
+});

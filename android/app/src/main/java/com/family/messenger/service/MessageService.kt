@@ -89,13 +89,32 @@ class MessageService : Service() {
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            val message = runCatching { Api.json.decodeFromString<SocketEvent>(text) }.getOrNull()
-                ?.takeIf { it.type == "message" }?.message ?: return
-            scope.launch {
-                MessageBus.messages.emit(message)
-                val me = app.session.auth.value?.user?.id
-                if (message.senderId != me && MessageBus.activeConversation.value != message.conversationId) {
-                    Notifications.showMessage(this@MessageService, message, message.conversationId == "family")
+            val event = runCatching { Api.json.decodeFromString<SocketEvent>(text) }.getOrNull() ?: return
+            scope.launch { handle(event) }
+        }
+
+        private suspend fun handle(event: SocketEvent) {
+            val me = app.session.auth.value?.user?.id
+            val context = this@MessageService
+            when (event.type) {
+                "message" -> {
+                    val message = event.message ?: return
+                    MessageBus.messages.emit(message)
+                    if (message.senderId != me && MessageBus.activeConversation.value != message.conversationId) {
+                        Notifications.showMessage(context, message, message.conversationId == "family")
+                    }
+                }
+                "post", "comment", "feed" -> {
+                    val postId = event.postId ?: return
+                    MessageBus.feedChanges.emit(postId)
+                    if (MessageBus.activeConversation.value == MessageBus.FEED) return
+                    if (event.type == "post" && event.authorId != me) {
+                        Notifications.showStory(context, "${event.authorName}님이 새 스토리를 올렸어요")
+                    }
+                    val comment = event.comment
+                    if (event.type == "comment" && comment != null && event.postAuthorId == me && comment.authorId != me) {
+                        Notifications.showStory(context, "${comment.authorName}님의 댓글: ${comment.text}")
+                    }
                 }
             }
         }

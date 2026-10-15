@@ -5,6 +5,7 @@ import path from 'node:path';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { openDatabase } from './db.js';
+import { registerFeedRoutes } from './feed.js';
 
 export const GROUP_ID = 'family';
 
@@ -84,7 +85,11 @@ export function createServer({ familyCode, dataDir }) {
 
   const app = express();
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '64kb' }));
+  const smallJson = express.json({ limit: '64kb' });
+  const postJson = express.json({ limit: '20mb' }); // story posts carry a base64 photo
+  app.use((req, res, next) =>
+    (req.method === 'POST' && req.path === '/api/posts' ? postJson : smallJson)(req, res, next),
+  );
 
   /** userId -> Set<WebSocket> */
   const sockets = new Map();
@@ -133,6 +138,19 @@ export function createServer({ familyCode, dataDir }) {
         if (ws.readyState === ws.OPEN) ws.send(data);
       }
     }
+  }
+
+  function broadcastAll(payload) {
+    broadcast([...sockets.keys()], payload);
+  }
+
+  /** Writes an uploaded image and returns its file name, or null for unsupported types. */
+  function saveImage(buffer, contentType) {
+    const ext = IMAGE_TYPES[contentType?.split(';')[0].trim()];
+    if (!ext) return null;
+    const name = `${crypto.randomBytes(16).toString('hex')}.${ext}`;
+    fs.writeFileSync(path.join(uploadDir, name), buffer);
+    return name;
   }
 
   function saveMessage(conversationId, senderId, kind, text, image, recipients) {
@@ -233,12 +251,9 @@ export function createServer({ familyCode, dataDir }) {
     requireConversation,
     express.raw({ type: Object.keys(IMAGE_TYPES), limit: '15mb' }),
     (req, res) => {
-      const ext = IMAGE_TYPES[req.get('content-type')?.split(';')[0].trim()];
-      if (!ext || !Buffer.isBuffer(req.body) || req.body.length === 0) {
-        return res.status(400).json({ error: '지원하지 않는 이미지 형식입니다.' });
-      }
-      const name = `${crypto.randomBytes(16).toString('hex')}.${ext}`;
-      fs.writeFileSync(path.join(uploadDir, name), req.body);
+      const name =
+        Buffer.isBuffer(req.body) && req.body.length > 0 ? saveImage(req.body, req.get('content-type')) : null;
+      if (!name) return res.status(400).json({ error: '지원하지 않는 이미지 형식입니다.' });
       res.status(201).json(saveMessage(req.params.id, req.user.id, 'image', null, name, req.participants));
     },
   );
@@ -246,12 +261,18 @@ export function createServer({ familyCode, dataDir }) {
   app.get('/api/images/:name', auth, (req, res) => {
     const { name } = req.params;
     if (!IMAGE_NAME.test(name)) return res.status(404).end();
-    const row = db.prepare('SELECT conversation_id FROM messages WHERE image = ?').get(name);
-    const ids = row && participants(db, row.conversation_id);
-    if (!ids || !ids.includes(req.user.id)) return res.status(404).end();
+    // Story photos are visible to the whole family; chat photos only to that conversation.
+    const isStory = db.prepare('SELECT 1 FROM posts WHERE image = ?').get(name);
+    if (!isStory) {
+      const row = db.prepare('SELECT conversation_id FROM messages WHERE image = ?').get(name);
+      const ids = row && participants(db, row.conversation_id);
+      if (!ids || !ids.includes(req.user.id)) return res.status(404).end();
+    }
     res.set('Cache-Control', 'private, max-age=31536000, immutable');
     res.sendFile(path.join(uploadDir, name));
   });
+
+  registerFeedRoutes(app, { db, auth, broadcastAll, saveImage, uploadDir });
 
   app.use((err, _req, res, _next) => {
     if (err.type === 'entity.too.large') return res.status(413).json({ error: '파일이 너무 큽니다.' });

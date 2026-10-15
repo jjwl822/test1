@@ -11,6 +11,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.family.messenger.MainActivity
 import com.family.messenger.R
 import com.family.messenger.data.Message
+import com.family.messenger.data.MessageBus
 
 object Notifications {
     private const val CHANNEL_MESSAGES = "messages"
@@ -58,6 +59,24 @@ object Notifications {
             manager.notify(message.conversationId.hashCode(), notification)
         } catch (_: SecurityException) {
             // Notification permission was revoked; nothing to show.
+        }
+    }
+
+    fun showStory(context: Context, text: String) {
+        val manager = NotificationManagerCompat.from(context)
+        if (!manager.areNotificationsEnabled()) return
+        val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("가족 스토리")
+            .setContentText(text)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_SOCIAL)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(openIntent(context, MessageBus.FEED, "가족 스토리"))
+            .build()
+        try {
+            manager.notify(MessageBus.FEED.hashCode(), notification)
+        } catch (_: SecurityException) {
         }
     }
 
