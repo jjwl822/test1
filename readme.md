@@ -75,6 +75,27 @@ FAMILY_CODE=우리집코드 npm start     # 또는 환경 변수로 지정
 
 앱을 열고 **가입하기** → 서버 주소, 가족 코드, 이름, 아이디, 비밀번호를 입력합니다.
 
+## 3. 아이폰 (웹앱)
+
+서버가 아이폰·PC용 웹앱도 함께 보여줍니다. 안드로이드 앱과 같은 대화·스토리·일정·목록을 씁니다.
+
+1. 아이폰 **사파리**로 서버 주소(https)를 엽니다.
+2. 아래쪽 **공유 버튼 → 홈 화면에 추가**를 누릅니다.
+3. 홈 화면에 생긴 **가족 메신저** 아이콘으로 열고 로그인(또는 가입)합니다.
+4. 채팅 탭 위의 **새 메시지 알림 받기 → 켜기**를 누르고 알림을 허용합니다.
+
+- 알림은 **iOS 16.4 이상**, **홈 화면에 추가한 앱**, **https 주소**에서만 동작합니다.
+- 사진은 올릴 때 자동으로 줄입니다. 동영상은 원본(mp4·mov) 그대로 올라가니 100MB 이하로 짧게 올려주세요.
+- PC 브라우저(크롬·엣지·사파리)에서도 같은 주소로 쓸 수 있습니다.
+
+### https 주소에 대해 (Cloudflare Tunnel)
+
+`cloudflared tunnel --url http://localhost:3000`처럼 계정 없이 만든 **임시 주소(…trycloudflare.com)는 cloudflared를 다시 켤 때마다 바뀝니다.**
+주소가 바뀌면 홈 화면에 추가한 앱과 알림이 예전 주소를 가리키게 되어, 가족 모두 새 주소로 다시 추가하고 알림을 다시 켜야 합니다.
+계속 쓰려면 Cloudflare 계정에 도메인을 연결해 **이름 있는 터널(named tunnel)** 로 고정 주소를 만드는 것을 추천합니다.
+
+알림용 키는 `data/vapid.json`에 저장됩니다. 이 파일을 지우면 모든 기기에서 알림을 다시 켜야 하니 `data/` 폴더째 백업하세요.
+
 ## 알림에 대해
 
 이 앱은 구글 Firebase 없이 직접 만든 서버를 쓰기 때문에, 앱이 서버와 연결을 유지하는 방식으로 알림을 받습니다.
@@ -88,5 +109,6 @@ FAMILY_CODE=우리집코드 npm start     # 또는 환경 변수로 지정
 ```bash
 cd server && npm test             # 서버 테스트
 cd android && ./gradlew assembleDebug testDebugUnitTest   # APK 빌드 + 앱 테스트
+# 웹앱(server/web)은 빌드가 필요 없습니다. 파일을 고치고 새로고침하면 됩니다.
 cd server && node scripts/capture-fixtures.mjs ../android/app/src/test/resources/fixtures   # 서버 API가 바뀌면 앱 테스트용 응답 갱신
 ```

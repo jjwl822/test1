@@ -2,12 +2,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { openDatabase } from './db.js';
 import { participants, registerChatRoutes } from './chat.js';
 import { registerFamilyRoutes } from './family.js';
 import { registerFeedRoutes } from './feed.js';
+import { createPush } from './push.js';
 
 export { GROUP_ID } from './chat.js';
 
@@ -17,8 +19,22 @@ const IMAGE_TYPES = {
   'image/webp': 'webp',
   'image/gif': 'gif',
 };
-const MEDIA_TYPES = { ...IMAGE_TYPES, 'video/mp4': 'mp4' };
-const MEDIA_NAME = /^[a-f0-9]{32}\.(jpg|png|webp|gif|mp4)$/;
+// iPhones record .mov (QuickTime); the web app uploads those as they are.
+const MEDIA_TYPES = { ...IMAGE_TYPES, 'video/mp4': 'mp4', 'video/quicktime': 'mov' };
+const MEDIA_NAME = /^[a-f0-9]{32}\.(jpg|png|webp|gif|mp4|mov)$/;
+const WEB_DIR = fileURLToPath(new URL('../web', import.meta.url));
+const COOKIE = 'fm_token';
+
+/** Login token from the Authorization header (Android app) or the login cookie (web app). */
+function tokenFrom(req) {
+  const header = req.headers.authorization ?? '';
+  if (header.startsWith('Bearer ')) return header.slice(7);
+  for (const part of (req.headers.cookie ?? '').split(';')) {
+    const [name, ...value] = part.trim().split('=');
+    if (name === COOKIE) return decodeURIComponent(value.join('='));
+  }
+  return null;
+}
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16);
@@ -48,7 +64,7 @@ function toUser(row) {
   };
 }
 
-export function createServer({ familyCode, dataDir, now = () => new Date(), reminderHour = 9 }) {
+export function createServer({ familyCode, dataDir, now = () => new Date(), reminderHour = 9, pushSend }) {
   if (!familyCode) throw new Error('familyCode is required');
   const uploadDir = path.join(dataDir, 'uploads');
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -60,6 +76,9 @@ export function createServer({ familyCode, dataDir, now = () => new Date(), remi
 
   /** userId -> Set<WebSocket> */
   const sockets = new Map();
+  /** True while someone has the web app open on screen (then they don't need a push). */
+  const isVisible = (userId) => [...(sockets.get(userId) ?? [])].some((ws) => ws.visible);
+  const push = createPush({ db, dataDir, isVisible, send: pushSend });
 
   function userForToken(token) {
     if (!token) return null;
@@ -79,9 +98,17 @@ export function createServer({ familyCode, dataDir, now = () => new Date(), remi
     return token;
   }
 
+  /** Web browsers can't attach a header to <img>/<video>/WebSocket, so the web app logs in with a cookie. */
+  function setLoginCookie(req, res, token) {
+    const https = req.secure || req.get('x-forwarded-proto') === 'https';
+    res.append(
+      'Set-Cookie',
+      `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${https ? '; Secure' : ''}`,
+    );
+  }
+
   function auth(req, res, next) {
-    const header = req.get('authorization') ?? '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+    const token = tokenFrom(req);
     const user = userForToken(token);
     if (!user) return res.status(401).json({ error: '로그인이 필요합니다.' });
     req.user = user;
@@ -117,6 +144,17 @@ export function createServer({ familyCode, dataDir, now = () => new Date(), remi
 
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
+  // Web push (web app on iPhone / PC)
+  app.get('/api/push/key', auth, (_req, res) => res.json({ publicKey: push.publicKey }));
+  app.post('/api/push/subscribe', auth, (req, res) => {
+    if (!push.subscribe(req.user.id, req.body)) return res.status(400).json({ error: '잘못된 알림 정보입니다.' });
+    res.json({ ok: true });
+  });
+  app.post('/api/push/unsubscribe', auth, (req, res) => {
+    push.unsubscribe(req.body?.endpoint);
+    res.json({ ok: true });
+  });
+
   app.post('/api/register', (req, res) => {
     const { familyCode: code, username, displayName, password } = req.body ?? {};
     if (!code || !safeEqual(code, familyCode)) {
@@ -139,7 +177,9 @@ export function createServer({ familyCode, dataDir, now = () => new Date(), remi
       .prepare('INSERT INTO users (username, display_name, password_hash, created_at) VALUES (?, ?, ?, ?)')
       .run(username, name, hashPassword(password), Date.now());
     const user = toUser(db.prepare('SELECT * FROM users WHERE id = ?').get(lastInsertRowid));
-    res.status(201).json({ token: issueToken(user.id), user });
+    const token = issueToken(user.id);
+    setLoginCookie(req, res, token);
+    res.status(201).json({ token, user });
   });
 
   app.post('/api/login', (req, res) => {
@@ -149,11 +189,15 @@ export function createServer({ familyCode, dataDir, now = () => new Date(), remi
     if (!row || typeof password !== 'string' || !verifyPassword(password, row.password_hash)) {
       return res.status(401).json({ error: '아이디 또는 비밀번호가 올바르지 않습니다.' });
     }
-    res.json({ token: issueToken(row.id), user: toUser(row) });
+    const token = issueToken(row.id);
+    setLoginCookie(req, res, token);
+    res.json({ token, user: toUser(row) });
   });
 
   app.post('/api/logout', auth, (req, res) => {
     db.prepare('DELETE FROM tokens WHERE token = ?').run(req.token);
+    if (req.body?.endpoint) push.unsubscribe(req.body.endpoint);
+    res.append('Set-Cookie', `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
     res.json({ ok: true });
   });
 
@@ -215,17 +259,28 @@ export function createServer({ familyCode, dataDir, now = () => new Date(), remi
     res.sendFile(path.join(uploadDir, name));
   });
 
-  registerChatRoutes(app, { db, auth, broadcast, saveFile, removeFiles, imageTypes: IMAGE_TYPES });
-  registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes: Object.keys(MEDIA_TYPES), now });
+  const notify = (userIds, payload) => push.notify(userIds, payload).catch((err) => console.warn(err));
+  registerChatRoutes(app, { db, auth, broadcast, saveFile, removeFiles, imageTypes: IMAGE_TYPES, notify });
+  registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes: Object.keys(MEDIA_TYPES), now, notify });
   const family = registerFamilyRoutes(app, {
     db,
     auth,
     broadcastAll,
     sendTo: (userId, payload) => broadcast([userId], payload),
-    connectedUserIds: () => [...sockets.keys()],
+    connectedUserIds: () => [...new Set([...sockets.keys(), ...push.userIds()])],
+    notify,
     now,
     reminderHour,
   });
+
+  // The web app (iPhone / PC). index.html and the service worker are never cached so updates show up.
+  app.use(
+    express.static(WEB_DIR, {
+      setHeaders: (res, file) => {
+        if (/(index\.html|sw\.js|\.webmanifest)$/.test(file)) res.set('Cache-Control', 'no-cache');
+      },
+    }),
+  );
 
   app.use((err, _req, res, _next) => {
     if (err.type === 'entity.too.large') return res.status(413).json({ error: '파일이 너무 큽니다.' });
@@ -239,8 +294,7 @@ export function createServer({ familyCode, dataDir, now = () => new Date(), remi
 
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://localhost');
-    const header = req.headers.authorization ?? '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : url.searchParams.get('token');
+    const token = tokenFrom(req) ?? url.searchParams.get('token');
     const user = url.pathname === '/ws' ? userForToken(token) : null;
     if (!user) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
@@ -249,7 +303,17 @@ export function createServer({ familyCode, dataDir, now = () => new Date(), remi
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws.isAlive = true;
+      ws.visible = false;
       ws.on('pong', () => (ws.isAlive = true));
+      // The web app reports whether it's on screen; Android keeps the default (not visible).
+      ws.on('message', (data) => {
+        try {
+          const msg = JSON.parse(data);
+          if (msg.type === 'visibility') ws.visible = Boolean(msg.visible);
+        } catch {
+          // ignore anything else
+        }
+      });
       if (!sockets.has(user.id)) sockets.set(user.id, new Set());
       sockets.get(user.id).add(ws);
       ws.on('close', () => {

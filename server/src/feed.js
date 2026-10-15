@@ -12,7 +12,7 @@ export const REACTIONS = ['heart', 'like', 'dislike'];
  * The family story feed: one shared board everyone sees, with photo + text posts,
  * comments and heart / like / dislike reactions.
  */
-export function registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes, now }) {
+export function registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes, now, notify }) {
   const mediaUrl = (name) => (name ? `/api/media/${name}` : null);
   const postMedia = db.prepare(
     'SELECT name, kind, poster FROM media WHERE post_id = ? AND position IS NOT NULL ORDER BY position',
@@ -197,6 +197,8 @@ export function registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uplo
     });
     const post = findPost(postId, req.user.id);
     broadcastAll({ type: 'post', postId: post.id, authorId: req.user.id, authorName: req.user.displayName });
+    const everyone = db.prepare('SELECT id FROM users WHERE id != ?').all(req.user.id).map((r) => r.id);
+    notify(everyone, { title: '가족 스토리', body: `${req.user.displayName}님이 새 스토리를 올렸어요`, url: '/#/story', tag: 'feed' });
     res.status(201).json(post);
   });
 
@@ -275,6 +277,14 @@ export function registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uplo
         .get(lastInsertRowid),
     );
     broadcastAll({ type: 'comment', postId: req.post.id, postAuthorId: req.post.authorId, comment });
+    if (req.post.authorId !== req.user.id) {
+      notify([req.post.authorId], {
+        title: '가족 스토리',
+        body: `${comment.authorName}님의 댓글: ${comment.text}`,
+        url: `/#/post/${req.post.id}`,
+        tag: `post-${req.post.id}`,
+      });
+    }
     res.status(201).json(comment);
   });
 

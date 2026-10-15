@@ -12,14 +12,13 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist node_modules (
-  echo 처음 실행 준비 중입니다. 잠시만 기다려주세요...
-  call npm install --omit=dev
-  if errorlevel 1 (
-    echo 설치에 실패했습니다. 인터넷 연결을 확인하세요.
-    pause
-    exit /b 1
-  )
+rem 새 버전에서 필요한 부품이 늘었을 수 있어 매번 확인합니다 (이미 있으면 금방 끝나요).
+echo 필요한 부품을 확인하는 중입니다...
+call npm install --omit=dev --no-audit --no-fund
+if errorlevel 1 (
+  echo 설치에 실패했습니다. 인터넷 연결을 확인하세요.
+  pause
+  exit /b 1
 )
 
 call npm start

@@ -17,7 +17,7 @@ function validDate(value) {
  * Family calendar (with day-before and same-day reminders), "1년 전 오늘" memory reminders,
  * and the shared shopping / to-do lists.
  */
-export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, connectedUserIds, now, reminderHour }) {
+export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, connectedUserIds, notify, now, reminderHour }) {
   // ---- Calendar -------------------------------------------------------------------------------
 
   const EVENT_SELECT = `
@@ -123,13 +123,14 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
     return reminders;
   }
 
-  /** Sends anything due to a connected person who hasn't had it yet. */
+  /** Sends anything due to a person (connected phone, or web push) who hasn't had it yet. */
   function remind(userId) {
     for (const r of dueReminders()) {
       const key = `${r.key}:user:${userId}`;
       if (wasSent.get(key)) continue;
       markSent.run(key, Date.now());
       sendTo(userId, { type: 'reminder', target: r.target, title: r.title, text: r.text });
+      notify([userId], { title: r.title, body: r.text, url: r.target === 'feed' ? '/#/story' : '/#/calendar', tag: r.key });
     }
   }
 

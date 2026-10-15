@@ -28,7 +28,7 @@ export function participants(db, conversationId) {
  * Conversations (family group + 1:1), messages with replies, emoji reactions, polls and
  * deletion, and read receipts.
  */
-export function registerChatRoutes(app, { db, auth, broadcast, saveFile, removeFiles, imageTypes }) {
+export function registerChatRoutes(app, { db, auth, broadcast, saveFile, removeFiles, imageTypes, notify }) {
   const MESSAGE_SELECT = `
     SELECT m.*, u.display_name AS sender_name
     FROM messages m JOIN users u ON u.id = m.sender_id`;
@@ -122,6 +122,16 @@ export function registerChatRoutes(app, { db, auth, broadcast, saveFile, removeF
     markRead.run(conversationId, senderId, id);
     const message = toMessage(byId.get(id));
     broadcast(recipients, { type: 'message', message });
+    const group = conversationId === GROUP_ID;
+    notify(
+      recipients.filter((r) => r !== senderId),
+      {
+        title: group ? '우리 가족' : message.senderName,
+        body: group ? `${message.senderName}: ${preview(byId.get(id))}` : preview(byId.get(id)),
+        url: `/#/chat/${conversationId}`,
+        tag: conversationId,
+      },
+    );
     return message;
   }
 

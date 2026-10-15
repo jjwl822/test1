@@ -4,13 +4,16 @@
   "private": true,
   "type": "module",
   "main": "src/index.js",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/index.js",
     "test": "node --test --test-timeout=30000"
   },
   "dependencies": {
     "express": "^4.21.2",
+    "web-push": "^3.6.7",
     "ws": "^8.18.0"
   }
 }
