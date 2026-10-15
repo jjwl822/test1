@@ -47,7 +47,11 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
         val commentsFor: Long? = null,
         val comments: List<Comment> = emptyList(),
         val summary: FeedSummary? = null,
-    )
+        /** "1년 전 오늘": posts from this day in earlier years. */
+        val memories: List<Post> = emptyList(),
+    ) {
+        fun find(id: Long?): Post? = posts.firstOrNull { it.id == id } ?: memories.firstOrNull { it.id == id }
+    }
 
     private val app = application as FamilyApp
     private val _state = MutableStateFlow(State())
@@ -64,6 +68,7 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
             val posts = app.api.posts()
             _state.value = _state.value.copy(posts = posts, loading = false, hasOlder = posts.size >= PAGE, error = null)
             loadSummary()
+            runCatching { app.api.memories() }.onSuccess { _state.value = _state.value.copy(memories = it) }
         } catch (e: Exception) {
             _state.value = _state.value.copy(loading = false, error = e.message)
         }
@@ -192,6 +197,11 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun upsert(post: Post) {
+        val memories = _state.value.memories
+        if (memories.any { it.id == post.id }) {
+            _state.value = _state.value.copy(memories = memories.map { if (it.id == post.id) post else it })
+            if (_state.value.posts.none { it.id == post.id }) return
+        }
         val posts = _state.value.posts
         val updated = if (posts.any { it.id == post.id }) {
             posts.map { if (it.id == post.id) post else it }
@@ -202,7 +212,10 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun remove(id: Long) {
-        _state.value = _state.value.copy(posts = _state.value.posts.filterNot { it.id == id })
+        _state.value = _state.value.copy(
+            posts = _state.value.posts.filterNot { it.id == id },
+            memories = _state.value.memories.filterNot { it.id == id },
+        )
     }
 
     private fun action(block: suspend () -> Unit) = viewModelScope.launch {

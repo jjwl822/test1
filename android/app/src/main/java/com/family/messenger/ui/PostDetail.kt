@@ -89,6 +89,7 @@ fun PostDetailScreen(
     onEdit: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val users by app.directory.users.collectAsStateWithLifecycle()
     var viewing by remember { mutableStateOf<Int?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
 
@@ -108,7 +109,13 @@ fun PostDetailScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState()),
         ) {
-            PostHeader(post, mine = post.authorId == me.id, onEdit = onEdit, onDelete = { confirmDelete = true })
+            PostHeader(
+                post,
+                avatarUrl = app.avatarUrl(users[post.authorId]),
+                mine = post.authorId == me.id,
+                onEdit = onEdit,
+                onDelete = { confirmDelete = true },
+            )
             if (post.media.isNotEmpty()) MediaPager(app, post.media) { viewing = it }
             ActionRow(post, onReact = { viewModel.react(post, it) }, onComments = { viewModel.openComments(post) })
             ReactionSummary(post)
@@ -145,6 +152,7 @@ fun PostDetailScreen(
         CommentsSheet(
             comments = state.comments,
             me = me,
+            avatarOf = { app.avatarUrl(users[it]) },
             postId = post.id,
             onDismiss = { viewModel.closeComments() },
             onSend = { viewModel.addComment(it) },
@@ -171,12 +179,12 @@ fun PostDetailScreen(
 }
 
 @Composable
-private fun PostHeader(post: Post, mine: Boolean, onEdit: () -> Unit, onDelete: () -> Unit) {
+private fun PostHeader(post: Post, avatarUrl: String?, mine: Boolean, onEdit: () -> Unit, onDelete: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(start = 12.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Avatar(post.authorName, size = 36.dp, ring = true)
+        Avatar(post.authorName, size = 36.dp, ring = true, imageUrl = avatarUrl)
         Spacer(Modifier.width(10.dp))
         Text(post.authorName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         if (mine) {
@@ -316,6 +324,7 @@ private fun ReactionSummary(post: Post) {
 private fun CommentsSheet(
     comments: List<Comment>,
     me: User,
+    avatarOf: (Long) -> String?,
     postId: Long,
     onDismiss: () -> Unit,
     onSend: (String) -> Unit,
@@ -345,7 +354,7 @@ private fun CommentsSheet(
                 }
                 items(comments, key = { it.id }) { comment ->
                     Row(verticalAlignment = Alignment.Top) {
-                        Avatar(comment.authorName, size = 32.dp)
+                        Avatar(comment.authorName, size = 32.dp, imageUrl = avatarOf(comment.authorId))
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -376,7 +385,7 @@ private fun CommentsSheet(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Avatar(me.displayName, size = 36.dp)
+                Avatar(me.displayName, size = 36.dp, imageUrl = avatarOf(me.id))
                 Spacer(Modifier.width(10.dp))
                 Box(
                     Modifier

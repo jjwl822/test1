@@ -7,6 +7,7 @@ data class User(
     val id: Long,
     val username: String,
     val displayName: String,
+    val avatarUrl: String? = null,
 )
 
 @Serializable
@@ -24,18 +25,95 @@ data class Message(
     val kind: String,
     val text: String? = null,
     val imageUrl: String? = null,
+    val deleted: Boolean = false,
+    val replyTo: ReplyPreview? = null,
+    val reactions: List<MessageReaction> = emptyList(),
+    val poll: Poll? = null,
     val createdAt: Long,
 ) {
     val isImage: Boolean get() = kind == "image"
-    val preview: String get() = if (isImage) "사진" else text.orEmpty()
+    val isPoll: Boolean get() = kind == "poll"
+    val preview: String
+        get() = when {
+            deleted -> "삭제된 메시지"
+            isImage -> "사진"
+            isPoll -> "투표: ${poll?.question ?: text.orEmpty()}"
+            else -> text.orEmpty()
+        }
 }
+
+@Serializable
+data class ReplyPreview(
+    val id: Long,
+    val senderName: String,
+    val preview: String,
+)
+
+@Serializable
+data class MessageReaction(
+    val emoji: String,
+    val userIds: List<Long>,
+)
+
+@Serializable
+data class Poll(
+    val question: String,
+    val multiple: Boolean,
+    val options: List<PollOption>,
+)
+
+@Serializable
+data class PollOption(
+    val id: Long,
+    val text: String,
+    val voterIds: List<Long>,
+)
+
+@Serializable
+data class ReadState(
+    val userId: Long,
+    val lastReadId: Long,
+)
+
+@Serializable
+data class CalendarEvent(
+    val id: Long,
+    val title: String,
+    /** YYYY-MM-DD */
+    val date: String,
+    /** HH:MM, or null for all-day */
+    val time: String? = null,
+    val note: String = "",
+    /** Repeats every year on the same day (birthdays, anniversaries). */
+    val yearly: Boolean = false,
+    val authorId: Long,
+    val authorName: String,
+    val createdAt: Long,
+)
+
+@Serializable
+data class ListItem(
+    val id: Long,
+    /** "shopping" or "todo" */
+    val list: String,
+    val text: String,
+    val done: Boolean,
+    val authorId: Long,
+    val authorName: String,
+    val doneByName: String? = null,
+    val createdAt: Long,
+    val doneAt: Long? = null,
+)
 
 @Serializable
 data class Conversation(
     val id: String,
     val kind: String,
     val title: String,
+    /** The other person, for 1:1 chats. */
+    val userId: Long? = null,
     val lastMessage: Message? = null,
+    val unreadCount: Int = 0,
 ) {
     val isGroup: Boolean get() = kind == "group"
 }
@@ -102,4 +180,11 @@ data class SocketEvent(
     val authorName: String? = null,
     val postAuthorId: Long? = null,
     val comment: Comment? = null,
+    val user: User? = null,
+    val conversationId: String? = null,
+    val userId: Long? = null,
+    val lastReadId: Long? = null,
+    val target: String? = null,
+    val title: String? = null,
+    val text: String? = null,
 )

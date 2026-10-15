@@ -12,43 +12,54 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChatBubble
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.family.messenger.data.MessageBus
 import com.family.messenger.data.User
 import com.family.messenger.service.MessageService
+import com.family.messenger.ui.CalendarScreen
 import com.family.messenger.ui.ChatScreen
 import com.family.messenger.ui.ConversationsScreen
-import com.family.messenger.ui.FeedScreen
+import com.family.messenger.ui.ConversationsViewModel
 import com.family.messenger.ui.FamilyTheme
+import com.family.messenger.ui.FeedScreen
+import com.family.messenger.ui.ListsScreen
 import com.family.messenger.ui.LoginScreen
+import com.family.messenger.ui.UnreadBadge
 import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
@@ -97,36 +108,53 @@ private fun App(app: FamilyApp, pendingChat: MutableStateFlow<Pair<String, Strin
         if (auth != null) {
             if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             MessageService.start(app)
+            app.directory.refresh()
         } else {
             MessageService.stop(app)
             chatId = null
         }
     }
+    // Names and profile photos may have changed while we were offline.
+    LaunchedEffect(Unit) { MessageBus.connected.collect { if (it) app.directory.refresh() } }
 
     val pending by pendingChat.collectAsStateWithLifecycle()
     LaunchedEffect(pending, auth != null) {
         val target = pending ?: return@LaunchedEffect
         if (auth != null) {
-            if (target.first == MessageBus.FEED) {
-                chatId = null
-                tab = TAB_STORY
-            } else {
-                chatId = target.first
-                chatTitle = target.second
+            when (target.first) {
+                MessageBus.FEED -> {
+                    chatId = null
+                    tab = TAB_STORY
+                }
+                MessageBus.CALENDAR -> {
+                    chatId = null
+                    tab = TAB_CALENDAR
+                }
+                else -> {
+                    chatId = target.first
+                    chatTitle = target.second
+                }
             }
         }
         pendingChat.value = null
     }
 
     val user = auth?.user
+    if (user == null) {
+        LoginScreen(app)
+        return
+    }
+    // Shared by the chat list and the unread badge on the tab bar.
+    val conversations: ConversationsViewModel = viewModel(key = "conversations-${user.id}") { ConversationsViewModel(app) }
     val openChat = chatId
-    when {
-        user == null -> LoginScreen(app)
-        openChat != null -> {
-            BackHandler { chatId = null }
-            ChatScreen(app, openChat, chatTitle, me = user, onBack = { chatId = null })
-        }
-        else -> Home(app, user, tab, onTab = { tab = it }, onOpenChat = { id, title ->
+    if (openChat != null) {
+        BackHandler { chatId = null }
+        ChatScreen(app, openChat, chatTitle, me = user, onBack = {
+            chatId = null
+            conversations.refresh()
+        })
+    } else {
+        Home(app, user, conversations, tab, onTab = { tab = it }, onOpenChat = { id, title ->
             chatId = id
             chatTitle = title
         })
@@ -135,9 +163,29 @@ private fun App(app: FamilyApp, pendingChat: MutableStateFlow<Pair<String, Strin
 
 private const val TAB_CHATS = 0
 private const val TAB_STORY = 1
+private const val TAB_CALENDAR = 2
+private const val TAB_LISTS = 3
+
+private data class TabSpec(val label: String, val selected: ImageVector, val unselected: ImageVector)
+
+private val TABS = listOf(
+    TabSpec("채팅", Icons.Filled.ChatBubble, Icons.Outlined.ChatBubbleOutline),
+    TabSpec("스토리", Icons.Filled.PhotoLibrary, Icons.Outlined.PhotoLibrary),
+    TabSpec("일정", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
+    TabSpec("목록", Icons.Filled.Checklist, Icons.Outlined.Checklist),
+)
 
 @Composable
-private fun Home(app: FamilyApp, me: User, tab: Int, onTab: (Int) -> Unit, onOpenChat: (String, String) -> Unit) {
+private fun Home(
+    app: FamilyApp,
+    me: User,
+    conversations: ConversationsViewModel,
+    tab: Int,
+    onTab: (Int) -> Unit,
+    onOpenChat: (String, String) -> Unit,
+) {
+    val rooms by conversations.conversations.collectAsStateWithLifecycle()
+    val unread = rooms.sumOf { it.unreadCount }
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
@@ -152,32 +200,23 @@ private fun Home(app: FamilyApp, me: User, tab: Int, onTab: (Int) -> Unit, onOpe
                         unselectedIconColor = MaterialTheme.colorScheme.onSurface,
                         unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    NavigationBarItem(
-                        selected = tab == TAB_CHATS,
-                        onClick = { onTab(TAB_CHATS) },
-                        icon = {
-                            Icon(
-                                if (tab == TAB_CHATS) Icons.Filled.ChatBubble else Icons.Outlined.ChatBubbleOutline,
-                                contentDescription = null,
-                                modifier = Modifier.size(26.dp),
-                            )
-                        },
-                        label = { Text("채팅") },
-                        colors = colors,
-                    )
-                    NavigationBarItem(
-                        selected = tab == TAB_STORY,
-                        onClick = { onTab(TAB_STORY) },
-                        icon = {
-                            Icon(
-                                if (tab == TAB_STORY) Icons.Filled.PhotoLibrary else Icons.Outlined.PhotoLibrary,
-                                contentDescription = null,
-                                modifier = Modifier.size(26.dp),
-                            )
-                        },
-                        label = { Text("스토리") },
-                        colors = colors,
-                    )
+                    TABS.forEachIndexed { index, spec ->
+                        NavigationBarItem(
+                            selected = tab == index,
+                            onClick = { onTab(index) },
+                            icon = {
+                                BadgedBox(badge = { if (index == TAB_CHATS && unread > 0) UnreadBadge(unread) }) {
+                                    Icon(
+                                        if (tab == index) spec.selected else spec.unselected,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(26.dp),
+                                    )
+                                }
+                            },
+                            label = { Text(spec.label) },
+                            colors = colors,
+                        )
+                    }
                 }
             }
         },
@@ -191,7 +230,9 @@ private fun Home(app: FamilyApp, me: User, tab: Int, onTab: (Int) -> Unit, onOpe
         ) {
             when (tab) {
                 TAB_STORY -> FeedScreen(app, me)
-                else -> ConversationsScreen(app, me = me, onOpen = onOpenChat)
+                TAB_CALENDAR -> CalendarScreen(app)
+                TAB_LISTS -> ListsScreen(app)
+                else -> ConversationsScreen(app, me = me, viewModel = conversations, onOpen = onOpenChat)
             }
         }
     }

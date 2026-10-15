@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.putJsonArray
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -79,16 +80,100 @@ class Api(private val session: Session) {
         return call(Request.Builder().url(url("/api/conversations/$conversationId/messages$query")).build())
     }
 
-    suspend fun sendText(conversationId: String, text: String): Message =
-        call(post(url("/api/conversations/$conversationId/messages"), buildJsonObject { put("text", text) }))
+    suspend fun sendText(conversationId: String, text: String, replyTo: Long? = null): Message =
+        call(
+            post(
+                url("/api/conversations/$conversationId/messages"),
+                buildJsonObject {
+                    put("text", text)
+                    if (replyTo != null) put("replyTo", replyTo)
+                },
+            ),
+        )
 
-    suspend fun sendImage(conversationId: String, jpeg: ByteArray): Message =
+    suspend fun sendImage(conversationId: String, jpeg: ByteArray, replyTo: Long? = null): Message =
         call(
             Request.Builder()
-                .url(url("/api/conversations/$conversationId/images"))
+                .url(url("/api/conversations/$conversationId/images" + if (replyTo != null) "?replyTo=$replyTo" else ""))
                 .post(jpeg.toRequestBody("image/jpeg".toMediaType()))
                 .build(),
         )
+
+    suspend fun reads(conversationId: String): List<ReadState> =
+        call(Request.Builder().url(url("/api/conversations/$conversationId/reads")).build())
+
+    suspend fun markRead(conversationId: String, lastReadId: Long) {
+        call<JsonObject>(post(url("/api/conversations/$conversationId/read"), buildJsonObject { put("lastReadId", lastReadId) }))
+    }
+
+    suspend fun createPoll(conversationId: String, question: String, options: List<String>, multiple: Boolean): Message =
+        call(
+            post(
+                url("/api/conversations/$conversationId/polls"),
+                buildJsonObject {
+                    put("question", question)
+                    putJsonArray("options") { options.forEach { add(it) } }
+                    put("multiple", multiple)
+                },
+            ),
+        )
+
+    suspend fun vote(messageId: Long, optionIds: List<Long>): Message =
+        call(post(url("/api/messages/$messageId/vote"), buildJsonObject { putJsonArray("optionIds") { optionIds.forEach { add(it) } } }))
+
+    suspend fun reactToMessage(messageId: Long, emoji: String): Message =
+        call(post(url("/api/messages/$messageId/reactions"), buildJsonObject { put("emoji", emoji) }))
+
+    suspend fun deleteMessage(messageId: Long): Message =
+        call(Request.Builder().url(url("/api/messages/$messageId")).delete().build())
+
+    suspend fun users(): List<User> = call(Request.Builder().url(url("/api/users")).build())
+
+    suspend fun updateName(displayName: String): User =
+        call(patch(url("/api/me"), buildJsonObject { put("displayName", displayName) }))
+
+    suspend fun uploadAvatar(jpeg: ByteArray): User =
+        call(Request.Builder().url(url("/api/me/avatar")).post(jpeg.toRequestBody("image/jpeg".toMediaType())).build())
+
+    suspend fun deleteAvatar(): User = call(Request.Builder().url(url("/api/me/avatar")).delete().build())
+
+    suspend fun memories(): List<Post> = call(Request.Builder().url(url("/api/memories")).build())
+
+    suspend fun events(): List<CalendarEvent> = call(Request.Builder().url(url("/api/events")).build())
+
+    suspend fun saveEvent(id: Long?, title: String, date: String, time: String?, note: String, yearly: Boolean): CalendarEvent {
+        val body = buildJsonObject {
+            put("title", title)
+            put("date", date)
+            if (time != null) put("time", time)
+            put("note", note)
+            put("yearly", yearly)
+        }
+        return call(if (id == null) post(url("/api/events"), body) else patch(url("/api/events/$id"), body))
+    }
+
+    suspend fun deleteEvent(id: Long) {
+        call<JsonObject>(Request.Builder().url(url("/api/events/$id")).delete().build())
+    }
+
+    suspend fun listItems(): List<ListItem> = call(Request.Builder().url(url("/api/lists/items")).build())
+
+    suspend fun addListItem(list: String, text: String): ListItem =
+        call(post(url("/api/lists/items"), buildJsonObject {
+            put("list", list)
+            put("text", text)
+        }))
+
+    suspend fun setListItemDone(id: Long, done: Boolean): ListItem =
+        call(patch(url("/api/lists/items/$id"), buildJsonObject { put("done", done) }))
+
+    suspend fun deleteListItem(id: Long) {
+        call<JsonObject>(Request.Builder().url(url("/api/lists/items/$id")).delete().build())
+    }
+
+    suspend fun clearDoneItems(list: String) {
+        call<JsonObject>(post(url("/api/lists/$list/clear-done"), buildJsonObject { }))
+    }
 
     suspend fun posts(before: Long? = null): List<Post> {
         val query = if (before != null) "?before=$before" else ""
@@ -160,6 +245,9 @@ class Api(private val session: Session) {
 
     private fun post(url: String, body: JsonObject): Request =
         Request.Builder().url(url).post(json.encodeToString(body).toJsonBody()).build()
+
+    private fun patch(url: String, body: JsonObject): Request =
+        Request.Builder().url(url).patch(json.encodeToString(body).toJsonBody()).build()
 
     private fun String.toJsonBody(): RequestBody = toRequestBody("application/json".toMediaType())
 

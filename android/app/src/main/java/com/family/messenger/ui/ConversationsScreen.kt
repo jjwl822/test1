@@ -1,5 +1,8 @@
 package com.family.messenger.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,74 +12,74 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
 import com.family.messenger.FamilyApp
 import com.family.messenger.data.Conversation
-import com.family.messenger.data.MessageBus
+import com.family.messenger.data.ImageCompressor
 import com.family.messenger.data.User
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ConversationsScreen(app: FamilyApp, me: User, onOpen: (id: String, title: String) -> Unit) {
-    var conversations by remember { mutableStateOf<List<Conversation>>(emptyList()) }
-    var error by remember { mutableStateOf<String?>(null) }
+fun ConversationsScreen(
+    app: FamilyApp,
+    me: User,
+    viewModel: ConversationsViewModel,
+    onOpen: (id: String, title: String) -> Unit,
+) {
+    val conversations by viewModel.conversations.collectAsStateWithLifecycle()
+    val error by viewModel.error.collectAsStateWithLifecycle()
+    val users by app.directory.users.collectAsStateWithLifecycle()
     var refreshing by remember { mutableStateOf(false) }
-    var confirmLogout by remember { mutableStateOf(false) }
+    var showProfile by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-
-    suspend fun load() {
-        try {
-            conversations = app.api.conversations()
-            error = null
-        } catch (e: Exception) {
-            error = e.message
-        }
-    }
-
-    LaunchedEffect(Unit) { load() }
-    LaunchedEffect(Unit) { MessageBus.messages.collect { load() } }
-    LaunchedEffect(Unit) { MessageBus.connected.filter { it }.collect { load() } }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("가족 메신저", style = MaterialTheme.typography.titleLarge) },
                 actions = {
-                    IconButton(onClick = { confirmLogout = true }) {
-                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "로그아웃")
+                    Box(Modifier.padding(end = 12.dp).clickable { showProfile = true }) {
+                        Avatar(me.displayName, size = 34.dp, imageUrl = app.avatarUrl(users[me.id] ?: me))
                     }
                 },
             )
@@ -87,7 +90,7 @@ fun ConversationsScreen(app: FamilyApp, me: User, onOpen: (id: String, title: St
             onRefresh = {
                 scope.launch {
                     refreshing = true
-                    load()
+                    viewModel.refresh().join()
                     refreshing = false
                 }
             },
@@ -104,7 +107,9 @@ fun ConversationsScreen(app: FamilyApp, me: User, onOpen: (id: String, title: St
                 }
                 error?.let { item { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) } }
                 items(conversations, key = { it.id }) { conversation ->
-                    ConversationRow(conversation) { onOpen(conversation.id, conversation.title) }
+                    ConversationRow(conversation, imageUrl = app.avatarUrl(users[conversation.userId])) {
+                        onOpen(conversation.id, conversation.title)
+                    }
                 }
                 if (conversations.size == 1) {
                     item {
@@ -120,6 +125,193 @@ fun ConversationsScreen(app: FamilyApp, me: User, onOpen: (id: String, title: St
         }
     }
 
+    if (showProfile) ProfileDialog(app, users[me.id] ?: me, onDismiss = { showProfile = false })
+}
+
+@Composable
+private fun ConversationRow(conversation: Conversation, imageUrl: String?, onClick: () -> Unit) {
+    val unread = conversation.unreadCount > 0
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Avatar(conversation.title, conversation.isGroup, size = 56.dp, ring = unread, imageUrl = imageUrl)
+        Column(Modifier.weight(1f)) {
+            Text(
+                conversation.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (unread) FontWeight.Bold else FontWeight.Normal,
+            )
+            val last = conversation.lastMessage
+            Text(
+                text = when {
+                    last == null -> "대화를 시작해 보세요"
+                    conversation.isGroup -> "${last.senderName}: ${last.preview}"
+                    else -> last.preview
+                } + (last?.let { " · ${formatAgo(it.createdAt)}" } ?: ""),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (unread) UnreadBadge(conversation.unreadCount)
+    }
+}
+
+/** Red count bubble, e.g. on a chat room or the 채팅 tab. */
+@Composable
+fun UnreadBadge(count: Int, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .heightIn(min = 20.dp)
+            .widthIn(min = 20.dp)
+            .background(HeartRed, CircleShape)
+            .padding(horizontal = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (count > 99) "99+" else count.toString(),
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+/**
+ * Round avatar: the profile photo when there is one, otherwise the first letter.
+ * [ring] adds Instagram's story gradient around it.
+ */
+@Composable
+fun Avatar(
+    name: String,
+    isGroup: Boolean = false,
+    size: Dp = 48.dp,
+    ring: Boolean = false,
+    imageUrl: String? = null,
+) {
+    val ringWidth = if (ring) (size.value / 20f).coerceAtLeast(2f).dp else 0.dp
+    Box(
+        modifier = Modifier
+            .size(size)
+            .then(if (ring) Modifier.border(ringWidth, StoryGradient, CircleShape) else Modifier)
+            .padding(ringWidth * 1.5f)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            imageUrl != null -> AsyncImage(
+                model = imageUrl,
+                contentDescription = name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            isGroup -> Icon(
+                Icons.Filled.Groups,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(size * 0.5f),
+            )
+            else -> Text(
+                name.take(1),
+                fontSize = (size.value * 0.4f).sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+    }
+}
+
+/** My profile: change photo and name, and log out. */
+@Composable
+private fun ProfileDialog(app: FamilyApp, me: User, onDismiss: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var name by rememberSaveable { mutableStateOf(me.displayName) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var confirmLogout by remember { mutableStateOf(false) }
+
+    fun launchAction(block: suspend () -> Unit) {
+        busy = true
+        error = null
+        scope.launch {
+            try {
+                block()
+            } catch (e: Exception) {
+                error = e.message
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            launchAction {
+                val jpeg = ImageCompressor.compress(app, uri, maxSide = 640)
+                app.directory.update(app.api.uploadAvatar(jpeg))
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("내 프로필") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                Box(contentAlignment = Alignment.Center) {
+                    Avatar(me.displayName, size = 96.dp, ring = true, imageUrl = app.avatarUrl(me))
+                    if (busy) CircularProgressIndicator()
+                }
+                Row {
+                    TextButton(
+                        onClick = { pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        enabled = !busy,
+                    ) { Text("사진 변경") }
+                    if (me.avatarUrl != null) {
+                        TextButton(onClick = { launchAction { app.directory.update(app.api.deleteAvatar()) } }, enabled = !busy) {
+                            Text("사진 삭제", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("이름") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                TextButton(onClick = { confirmLogout = true }, modifier = Modifier.padding(top = 8.dp)) {
+                    Text("로그아웃", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (name.trim() == me.displayName) {
+                        onDismiss()
+                    } else {
+                        launchAction {
+                            app.directory.update(app.api.updateName(name.trim()))
+                            onDismiss()
+                        }
+                    }
+                },
+                enabled = !busy && name.isNotBlank(),
+            ) { Text("완료", fontWeight = FontWeight.SemiBold) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("닫기") } },
+    )
+
     if (confirmLogout) {
         AlertDialog(
             onDismissRequest = { confirmLogout = false },
@@ -130,73 +322,12 @@ fun ConversationsScreen(app: FamilyApp, me: User, onOpen: (id: String, title: St
                     confirmLogout = false
                     scope.launch {
                         runCatching { app.api.logout() }
+                        app.directory.clear()
                         app.session.clear()
                     }
-                }) { Text("로그아웃") }
+                }) { Text("로그아웃", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("취소") } },
         )
-    }
-}
-
-@Composable
-private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Avatar(conversation.title, conversation.isGroup, size = 56.dp, ring = conversation.lastMessage != null)
-        Column(Modifier.weight(1f)) {
-            Text(conversation.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            val last = conversation.lastMessage
-            Text(
-                text = when {
-                    last == null -> "대화를 시작해 보세요"
-                    conversation.isGroup -> "${last.senderName}: ${last.preview}"
-                    else -> last.preview
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        conversation.lastMessage?.let {
-            Text(formatTime(it.createdAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-/** Round avatar with the person's first letter; [ring] adds Instagram's story gradient around it. */
-@Composable
-fun Avatar(name: String, isGroup: Boolean = false, size: Dp = 48.dp, ring: Boolean = false) {
-    val ringWidth = if (ring) (size.value / 20f).coerceAtLeast(2f).dp else 0.dp
-    Box(
-        modifier = Modifier
-            .size(size)
-            .then(if (ring) Modifier.border(ringWidth, StoryGradient, CircleShape) else Modifier)
-            .padding(ringWidth * 1.5f)
-            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (isGroup) {
-            Icon(
-                Icons.Filled.Groups,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.size(size * 0.5f),
-            )
-        } else {
-            Text(
-                name.take(1),
-                fontSize = (size.value * 0.4f).sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-        }
     }
 }

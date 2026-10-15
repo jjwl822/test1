@@ -6,6 +6,7 @@ import { createServer } from './app.js';
 
 const port = Number(process.env.PORT) || 3000;
 const dataDir = path.resolve(process.env.DATA_DIR || 'data');
+const reminderHour = Number(process.env.REMINDER_HOUR ?? 9);
 const configFile = path.join(dataDir, 'config.json');
 
 function readConfig() {
@@ -47,7 +48,7 @@ function lanAddresses() {
 }
 
 const code = await familyCode();
-createServer({ familyCode: code, dataDir }).listen(port, () => {
+createServer({ familyCode: code, dataDir, reminderHour }).listen(port, () => {
   const addresses = lanAddresses();
   console.log('========================================');
   console.log(' 가족 메신저 서버가 켜졌습니다');

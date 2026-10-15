@@ -23,16 +23,36 @@ class ChatViewModel(application: Application, private val conversationId: String
         val hasOlder: Boolean = false,
         val sending: Boolean = false,
         val error: String? = null,
-    )
+        /** How far each person in the room has read: userId -> last read message id. */
+        val reads: Map<Long, Long> = emptyMap(),
+        /** The message being replied to, shown above the input box. */
+        val replyingTo: Message? = null,
+    ) {
+        /** How many people (other than the sender) haven't read [message] yet — the "1" in KakaoTalk. */
+        fun unreadCount(message: Message): Int =
+            reads.count { (userId, lastRead) -> userId != message.senderId && lastRead < message.id }
+    }
 
     private val app = application as FamilyApp
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
+    private val me get() = app.session.auth.value?.user?.id
 
     init {
         loadLatest()
         viewModelScope.launch {
-            MessageBus.messages.filter { it.conversationId == conversationId }.collect(::merge)
+            MessageBus.messages.filter { it.conversationId == conversationId }.collect {
+                merge(it)
+                markRead()
+            }
+        }
+        viewModelScope.launch {
+            MessageBus.messageUpdates.filter { it.conversationId == conversationId }.collect(::replace)
+        }
+        viewModelScope.launch {
+            MessageBus.reads.filter { it.conversationId == conversationId }.collect { read ->
+                updateRead(read.userId, read.lastReadId)
+            }
         }
         // Catch up on anything missed while the connection was down.
         viewModelScope.launch {
@@ -44,15 +64,34 @@ class ChatViewModel(application: Application, private val conversationId: String
         try {
             val latest = app.api.messages(conversationId)
             val first = _state.value.messages.isEmpty()
-            latest.forEach(::merge)
+            latest.forEach { if (!replace(it)) merge(it) }
+            val reads = app.api.reads(conversationId).associate { it.userId to it.lastReadId }
             _state.value = _state.value.copy(
                 loading = false,
                 hasOlder = if (first) latest.size >= PAGE else _state.value.hasOlder,
+                reads = reads,
                 error = null,
             )
+            markRead()
         } catch (e: Exception) {
             _state.value = _state.value.copy(loading = false, error = e.message)
         }
+    }
+
+    /** Tells the server I've seen everything on screen, but only while this chat is actually open. */
+    fun markRead() {
+        val newest = _state.value.messages.lastOrNull()?.id ?: return
+        val mine = me ?: return
+        if (MessageBus.activeConversation.value != conversationId) return
+        if ((_state.value.reads[mine] ?: 0) >= newest) return
+        updateRead(mine, newest)
+        viewModelScope.launch { runCatching { app.api.markRead(conversationId, newest) } }
+    }
+
+    private fun updateRead(userId: Long, lastReadId: Long) {
+        val reads = _state.value.reads
+        if ((reads[userId] ?: 0) >= lastReadId) return
+        _state.value = _state.value.copy(reads = reads + (userId to lastReadId))
     }
 
     fun loadOlder() = viewModelScope.launch {
@@ -68,22 +107,63 @@ class ChatViewModel(application: Application, private val conversationId: String
         }
     }
 
-    fun sendText(text: String) = send { app.api.sendText(conversationId, text) }
+    fun replyTo(message: Message?) {
+        _state.value = _state.value.copy(replyingTo = message)
+    }
 
-    fun sendImage(uri: Uri) = send {
-        val jpeg = ImageCompressor.compress(app, uri)
-        app.api.sendImage(conversationId, jpeg)
+    fun sendText(text: String) {
+        val replyId = _state.value.replyingTo?.id
+        send { app.api.sendText(conversationId, text, replyId) }
+    }
+
+    fun sendImage(uri: Uri) {
+        val replyId = _state.value.replyingTo?.id
+        send {
+            val jpeg = ImageCompressor.compress(app, uri)
+            app.api.sendImage(conversationId, jpeg, replyId)
+        }
+    }
+
+    fun createPoll(question: String, options: List<String>, multiple: Boolean) =
+        send { app.api.createPoll(conversationId, question, options, multiple) }
+
+    fun vote(message: Message, optionIds: List<Long>) = update { app.api.vote(message.id, optionIds) }
+
+    fun react(message: Message, emoji: String) = update { app.api.reactToMessage(message.id, emoji) }
+
+    fun delete(message: Message) = update { app.api.deleteMessage(message.id) }
+
+    fun clearError() {
+        _state.value = _state.value.copy(error = null)
     }
 
     private fun send(block: suspend () -> Message) = viewModelScope.launch {
-        _state.value = _state.value.copy(sending = true, error = null)
+        _state.value = _state.value.copy(sending = true, error = null, replyingTo = null)
         try {
-            merge(block())
+            val message = block()
+            merge(message)
+            me?.let { updateRead(it, message.id) }
         } catch (e: Exception) {
             _state.value = _state.value.copy(error = e.message ?: "전송에 실패했습니다.")
         } finally {
             _state.value = _state.value.copy(sending = false)
         }
+    }
+
+    private fun update(block: suspend () -> Message) = viewModelScope.launch {
+        try {
+            replace(block())
+        } catch (e: Exception) {
+            _state.value = _state.value.copy(error = e.message)
+        }
+    }
+
+    /** Swaps in a newer copy of a message already on screen. Returns false if it isn't there. */
+    private fun replace(message: Message): Boolean {
+        val current = _state.value.messages
+        if (current.none { it.id == message.id }) return false
+        _state.value = _state.value.copy(messages = current.map { if (it.id == message.id) message else it })
+        return true
     }
 
     /** Adds a message once, keeping the list ordered by id (the socket and the API may both deliver it). */

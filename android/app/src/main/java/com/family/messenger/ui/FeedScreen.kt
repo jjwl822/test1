@@ -15,11 +15,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items as lazyItems
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.GridOn
@@ -37,7 +40,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -47,6 +49,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.ContentScale
@@ -55,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -75,15 +79,15 @@ fun FeedScreen(app: FamilyApp, me: User) {
     // null: editor closed, NEW_POST: writing a new post, otherwise the id of the post being edited.
     var editorFor by rememberSaveable { mutableStateOf<Long?>(null) }
 
-    DisposableEffect(Unit) {
+    LifecycleResumeEffect(Unit) {
         MessageBus.activeConversation.value = MessageBus.FEED
         Notifications.cancel(app, MessageBus.FEED)
-        onDispose {
+        onPauseOrDispose {
             if (MessageBus.activeConversation.value == MessageBus.FEED) MessageBus.activeConversation.value = null
         }
     }
 
-    val openPost = state.posts.firstOrNull { it.id == openPostId }
+    val openPost = state.find(openPostId)
     // The open post was deleted (by me or someone else): go back to the grid.
     LaunchedEffect(openPostId, openPost == null, state.loading) {
         if (openPostId != null && openPost == null && !state.loading) openPostId = null
@@ -116,7 +120,7 @@ fun FeedScreen(app: FamilyApp, me: User) {
         )
     }
 
-    val editing = state.posts.firstOrNull { it.id == editorFor }
+    val editing = state.find(editorFor)
     // The post being edited was deleted meanwhile: close the editor.
     LaunchedEffect(editorFor, editing == null) {
         if (editorFor != null && editorFor != NEW_POST && editing == null) editorFor = null
@@ -182,6 +186,9 @@ private fun StoryGrid(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 item(span = { GridItemSpan(maxLineSpan) }) { ProfileHeader(state, onNew) }
+                if (state.memories.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) { MemoriesRow(app, state.memories, onOpen) }
+                }
                 state.error?.let { error ->
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
@@ -233,6 +240,61 @@ private fun ProfileHeader(state: FeedViewModel.State, onNew: () -> Unit) {
         HorizontalDivider()
         Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
             Icon(Icons.Filled.GridOn, contentDescription = null)
+        }
+    }
+}
+
+/** "1년 전 오늘": a horizontal strip of posts from this day in earlier years. */
+@Composable
+private fun MemoriesRow(app: FamilyApp, memories: List<Post>, onOpen: (Post) -> Unit) {
+    val thisYear = java.time.LocalDate.now().year
+    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+        Text(
+            "✨ 1년 전 오늘",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+        )
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            lazyItems(memories, key = { it.id }) { post ->
+                val years = thisYear - java.time.Instant.ofEpochMilli(post.createdAt).atZone(java.time.ZoneId.systemDefault()).year
+                Box(
+                    Modifier
+                        .size(width = 110.dp, height = 150.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(StoryGradient)
+                        .clickable { onOpen(post) },
+                ) {
+                    val cover = post.media.firstOrNull()
+                    if (cover != null) {
+                        AsyncImage(
+                            model = app.api.url(cover.posterUrl ?: cover.url),
+                            contentDescription = post.text,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Text(
+                            post.text,
+                            color = Color.White,
+                            maxLines = 5,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(10.dp),
+                        )
+                    }
+                    Text(
+                        "${years}년 전",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+            }
         }
     }
 }

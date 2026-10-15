@@ -80,6 +80,25 @@ object Notifications {
         }
     }
 
+    /** Calendar ("내일 일정: 치과") and memory ("1년 전 오늘") reminders. [target] is the tab to open. */
+    fun showReminder(context: Context, title: String, text: String, target: String) {
+        val manager = NotificationManagerCompat.from(context)
+        if (!manager.areNotificationsEnabled()) return
+        val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(openIntent(context, target, title))
+            .build()
+        try {
+            manager.notify((title + text).hashCode(), notification)
+        } catch (_: SecurityException) {
+        }
+    }
+
     fun cancel(context: Context, conversationId: String) {
         NotificationManagerCompat.from(context).cancel(conversationId.hashCode())
     }

@@ -7,7 +7,7 @@
   "engines": { "node": ">=22.13" },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/index.js",
-    "test": "node --test"
+    "test": "node --test --test-timeout=30000"
   },
   "dependencies": {
     "express": "^4.21.2",

@@ -104,6 +104,21 @@ class MessageService : Service() {
                         Notifications.showMessage(context, message, message.conversationId == "family")
                     }
                 }
+                "messageUpdated" -> event.message?.let { MessageBus.messageUpdates.emit(it) }
+                "read" -> {
+                    val conversationId = event.conversationId ?: return
+                    val userId = event.userId ?: return
+                    MessageBus.reads.emit(MessageBus.Read(conversationId, userId, event.lastReadId ?: 0))
+                }
+                "user" -> event.user?.let(app.directory::update)
+                "events" -> MessageBus.eventsChanged.emit(Unit)
+                "lists" -> MessageBus.listsChanged.emit(Unit)
+                "reminder" -> Notifications.showReminder(
+                    context,
+                    event.title.orEmpty(),
+                    event.text.orEmpty(),
+                    if (event.target == "feed") MessageBus.FEED else MessageBus.CALENDAR,
+                )
                 "post", "comment", "feed" -> {
                     val postId = event.postId ?: return
                     MessageBus.feedChanges.emit(postId)

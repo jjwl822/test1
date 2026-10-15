@@ -12,7 +12,7 @@ export const REACTIONS = ['heart', 'like', 'dislike'];
  * The family story feed: one shared board everyone sees, with photo + text posts,
  * comments and heart / like / dislike reactions.
  */
-export function registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes }) {
+export function registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes, now }) {
   const mediaUrl = (name) => (name ? `/api/media/${name}` : null);
   const postMedia = db.prepare(
     'SELECT name, kind, poster FROM media WHERE post_id = ? AND position IS NOT NULL ORDER BY position',
@@ -77,6 +77,21 @@ export function registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uplo
     const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50);
     const before = Number(req.query.before) || Number.MAX_SAFE_INTEGER;
     const rows = db.prepare(`${POST_SELECT} WHERE p.id < ? ORDER BY p.id DESC LIMIT ?`).all(before, limit);
+    res.json(rows.map((r) => toPost(r, req.user.id)));
+  });
+
+  // "1년 전 오늘": posts from this month and day in earlier years, newest first.
+  app.get('/api/memories', auth, (req, res) => {
+    const today = now();
+    const monthDay = `${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const rows = db
+      .prepare(
+        `${POST_SELECT}
+         WHERE strftime('%m-%d', p.created_at / 1000, 'unixepoch', 'localtime') = ?
+           AND strftime('%Y', p.created_at / 1000, 'unixepoch', 'localtime') < ?
+         ORDER BY p.id DESC`,
+      )
+      .all(monthDay, String(today.getFullYear()));
     res.json(rows.map((r) => toPost(r, req.user.id)));
   });
 

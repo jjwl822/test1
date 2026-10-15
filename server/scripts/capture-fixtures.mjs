@@ -1,0 +1,65 @@
+// Captures real server responses as JSON fixtures for the Android app's ServerContractTest.
+// Usage (from server/): node scripts/capture-fixtures.mjs ../android/app/src/test/resources/fixtures
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import WebSocket from 'ws';
+import { createServer } from '../src/app.js';
+
+const out = process.argv[2];
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fx-'));
+const server = createServer({ familyCode: 'c', dataDir, now: () => new Date(2026, 9, 15, 10, 0) });
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const base = `http://127.0.0.1:${server.address().port}`;
+const call = async (method, url, token, json, body, type) => {
+  const headers = {};
+  if (token) headers.authorization = `Bearer ${token}`;
+  if (json) headers['content-type'] = 'application/json';
+  if (type) headers['content-type'] = type;
+  const r = await fetch(base + url, { method, headers, body: json ? JSON.stringify(json) : body });
+  return r.text();
+};
+const save = (name, text) => fs.writeFileSync(path.join(out, `${name}.json`), text);
+const reg = async (u, n) => JSON.parse(await call('POST', '/api/register', null, { familyCode: 'c', username: u, displayName: n, password: 'pass1234' }));
+const mom = await reg('mom', '엄마');
+const dad = await reg('dad', '아빠');
+const png = Buffer.from('89504e470d0a1a0a', 'hex');
+const events = [];
+const ws = new WebSocket(`${base.replace('http', 'ws')}/ws`, { headers: { authorization: `Bearer ${dad.token}` } });
+ws.on('message', (d) => events.push(d.toString()));
+await new Promise((r) => ws.on('open', r));
+
+save('auth', JSON.stringify(mom));
+await call('POST', '/api/me/avatar', mom.token, null, png, 'image/png');
+save('users', await call('GET', '/api/users', dad.token));
+const m1 = JSON.parse(await call('POST', '/api/conversations/family/messages', mom.token, { text: '안녕' }));
+const reply = await call('POST', '/api/conversations/family/messages', dad.token, { text: '응', replyTo: m1.id });
+save('message_reply', reply);
+await call('POST', `/api/messages/${m1.id}/reactions`, dad.token, { emoji: '❤️' });
+const poll = JSON.parse(await call('POST', '/api/conversations/family/polls', mom.token, { question: '저녁?', options: ['짜장', '짬뽕'] }));
+await call('POST', `/api/messages/${poll.id}/vote`, dad.token, { optionIds: [poll.poll.options[0].id] });
+await call('DELETE', `/api/messages/${JSON.parse(reply).id}`, dad.token);
+save('messages', await call('GET', '/api/conversations/family/messages', mom.token));
+save('reads', await call('GET', '/api/conversations/family/reads', mom.token));
+save('conversations', await call('GET', '/api/conversations', dad.token));
+const up = JSON.parse(await call('POST', '/api/media', mom.token, null, png, 'image/png'));
+await call('POST', '/api/posts', mom.token, { text: '소풍', media: [{ name: up.name }] });
+save('posts', await call('GET', '/api/posts', dad.token));
+save('memories', await call('GET', '/api/memories', dad.token));
+save('summary', await call('GET', '/api/feed/summary', dad.token));
+await call('POST', '/api/events', mom.token, { title: '생일', date: '1970-10-15', yearly: true });
+await call('POST', '/api/events', mom.token, { title: '치과', date: '2026-10-16', time: '14:30', note: '보험증' });
+save('events', await call('GET', '/api/events', dad.token));
+const it = JSON.parse(await call('POST', '/api/lists/items', mom.token, { list: 'shopping', text: '우유' }));
+await call('PATCH', `/api/lists/items/${it.id}`, dad.token, { done: true });
+await call('POST', '/api/lists/items', mom.token, { list: 'todo', text: '청소' });
+save('items', await call('GET', '/api/lists/items', dad.token));
+// a fresh socket to receive reminders
+const ws2 = new WebSocket(`${base.replace('http', 'ws')}/ws`, { headers: { authorization: `Bearer ${mom.token}` } });
+ws2.on('message', (d) => events.push(d.toString()));
+await new Promise((r) => setTimeout(r, 300));
+save('socket_events', '[' + events.join(',') + ']');
+ws.close(); ws2.close();
+await new Promise((r) => server.close(r));
+fs.rmSync(dataDir, { recursive: true, force: true });
+console.log([...new Set(events.map((e) => JSON.parse(e).type))].join(' '));

@@ -55,7 +55,7 @@ object VideoCompressor {
             Effects.EMPTY
         }
         val composition = Composition.Builder(
-            EditedMediaItemSequence(EditedMediaItem.Builder(MediaItem.fromUri(uri)).setEffects(effects).build()),
+            EditedMediaItemSequence.Builder(EditedMediaItem.Builder(MediaItem.fromUri(uri)).setEffects(effects).build()).build(),
         )
             // Many phones record HDR, which most encoders can't write; convert to normal (SDR) video.
             .setHdrMode(Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL)

@@ -24,9 +24,11 @@ export function openDatabase(file) {
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
       conversation_id TEXT NOT NULL,
       sender_id       INTEGER NOT NULL REFERENCES users(id),
-      kind            TEXT NOT NULL CHECK (kind IN ('text', 'image')),
+      kind            TEXT NOT NULL CHECK (kind IN ('text', 'image', 'poll')),
       text            TEXT,
       image           TEXT,
+      reply_to        INTEGER,
+      deleted         INTEGER NOT NULL DEFAULT 0,
       created_at      INTEGER NOT NULL
     );
 
@@ -75,8 +77,107 @@ export function openDatabase(file) {
     INSERT OR IGNORE INTO media (name, uploader_id, kind, post_id, position, created_at)
       SELECT image, author_id, 'image', id, 0, created_at FROM posts WHERE image IS NOT NULL;
   `);
-  // Added after the first release; older databases get the column here.
-  const postColumns = db.prepare('PRAGMA table_info(posts)').all().map((c) => c.name);
-  if (!postColumns.includes('edited_at')) db.exec('ALTER TABLE posts ADD COLUMN edited_at INTEGER');
+  migrate(db);
+  db.exec(`
+    -- Last message each person has read in each conversation (read receipts and unread counts).
+    CREATE TABLE IF NOT EXISTS reads (
+      conversation_id TEXT NOT NULL,
+      user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      last_read_id    INTEGER NOT NULL,
+      PRIMARY KEY (conversation_id, user_id)
+    );
+
+    -- One emoji per person per message.
+    CREATE TABLE IF NOT EXISTS message_reactions (
+      message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      emoji      TEXT NOT NULL,
+      PRIMARY KEY (message_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS polls (
+      message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+      question   TEXT NOT NULL,
+      multiple   INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS poll_options (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id INTEGER NOT NULL REFERENCES polls(message_id) ON DELETE CASCADE,
+      text       TEXT NOT NULL,
+      position   INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS poll_votes (
+      option_id INTEGER NOT NULL REFERENCES poll_options(id) ON DELETE CASCADE,
+      user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      PRIMARY KEY (option_id, user_id)
+    );
+
+    -- Family calendar. yearly = birthdays and anniversaries that repeat every year.
+    CREATE TABLE IF NOT EXISTS events (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      title      TEXT NOT NULL,
+      date       TEXT NOT NULL,
+      time       TEXT,
+      note       TEXT NOT NULL DEFAULT '',
+      yearly     INTEGER NOT NULL DEFAULT 0,
+      author_id  INTEGER NOT NULL REFERENCES users(id),
+      created_at INTEGER NOT NULL
+    );
+
+    -- Remembers which reminder notifications were already sent, so each goes out once.
+    CREATE TABLE IF NOT EXISTS reminders_sent (
+      key     TEXT PRIMARY KEY,
+      sent_at INTEGER NOT NULL
+    );
+
+    -- Shared shopping list and to-do list.
+    CREATE TABLE IF NOT EXISTS list_items (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      list       TEXT NOT NULL CHECK (list IN ('shopping', 'todo')),
+      text       TEXT NOT NULL,
+      done       INTEGER NOT NULL DEFAULT 0,
+      author_id  INTEGER NOT NULL REFERENCES users(id),
+      done_by    INTEGER REFERENCES users(id),
+      created_at INTEGER NOT NULL,
+      done_at    INTEGER
+    );
+  `);
   return db;
+}
+
+/** Brings databases created by earlier versions up to the current schema. */
+function migrate(db) {
+  const columns = (table) => db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!columns('posts').includes('edited_at')) db.exec('ALTER TABLE posts ADD COLUMN edited_at INTEGER');
+  if (!columns('users').includes('avatar')) db.exec('ALTER TABLE users ADD COLUMN avatar TEXT');
+
+  // SQLite can't change a CHECK constraint, so the messages table is rebuilt to allow polls,
+  // replies and deleted messages.
+  const { sql } = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'messages'").get();
+  if (!sql.includes("'poll'")) {
+    db.exec(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN;
+      CREATE TABLE messages_new (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id TEXT NOT NULL,
+        sender_id       INTEGER NOT NULL REFERENCES users(id),
+        kind            TEXT NOT NULL CHECK (kind IN ('text', 'image', 'poll')),
+        text            TEXT,
+        image           TEXT,
+        reply_to        INTEGER,
+        deleted         INTEGER NOT NULL DEFAULT 0,
+        created_at      INTEGER NOT NULL
+      );
+      INSERT INTO messages_new (id, conversation_id, sender_id, kind, text, image, created_at)
+        SELECT id, conversation_id, sender_id, kind, text, image, created_at FROM messages;
+      DROP TABLE messages;
+      ALTER TABLE messages_new RENAME TO messages;
+      CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id);
+      COMMIT;
+      PRAGMA foreign_keys = ON;
+    `);
+  }
 }

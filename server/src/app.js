@@ -5,9 +5,11 @@ import path from 'node:path';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { openDatabase } from './db.js';
+import { participants, registerChatRoutes } from './chat.js';
+import { registerFamilyRoutes } from './family.js';
 import { registerFeedRoutes } from './feed.js';
 
-export const GROUP_ID = 'family';
+export { GROUP_ID } from './chat.js';
 
 const IMAGE_TYPES = {
   'image/jpeg': 'jpg',
@@ -17,7 +19,6 @@ const IMAGE_TYPES = {
 };
 const MEDIA_TYPES = { ...IMAGE_TYPES, 'video/mp4': 'mp4' };
 const MEDIA_NAME = /^[a-f0-9]{32}\.(jpg|png|webp|gif|mp4)$/;
-const MAX_TEXT = 4000;
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16);
@@ -38,47 +39,16 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ha, hb);
 }
 
-function directId(a, b) {
-  const [x, y] = [a, b].sort((p, q) => p - q);
-  return `dm-${x}-${y}`;
-}
-
-/** Returns the user ids allowed in a conversation, or null if the id is invalid. */
-function participants(db, conversationId) {
-  if (conversationId === GROUP_ID) {
-    return db.prepare('SELECT id FROM users').all().map((r) => r.id);
-  }
-  const m = /^dm-(\d+)-(\d+)$/.exec(conversationId);
-  if (!m) return null;
-  const a = Number(m[1]);
-  const b = Number(m[2]);
-  if (a >= b) return null;
-  const found = db.prepare('SELECT id FROM users WHERE id IN (?, ?)').all(a, b);
-  return found.length === 2 ? [a, b] : null;
-}
-
 function toUser(row) {
-  return { id: row.id, username: row.username, displayName: row.display_name };
-}
-
-function toMessage(row) {
   return {
     id: row.id,
-    conversationId: row.conversation_id,
-    senderId: row.sender_id,
-    senderName: row.sender_name,
-    kind: row.kind,
-    text: row.text ?? null,
-    imageUrl: row.image ? `/api/images/${row.image}` : null,
-    createdAt: row.created_at,
+    username: row.username,
+    displayName: row.display_name,
+    avatarUrl: row.avatar ? `/api/media/${row.avatar}` : null,
   };
 }
 
-const MESSAGE_SELECT = `
-  SELECT m.*, u.display_name AS sender_name
-  FROM messages m JOIN users u ON u.id = m.sender_id`;
-
-export function createServer({ familyCode, dataDir }) {
+export function createServer({ familyCode, dataDir, now = () => new Date(), reminderHour = 9 }) {
   if (!familyCode) throw new Error('familyCode is required');
   const uploadDir = path.join(dataDir, 'uploads');
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -119,15 +89,6 @@ export function createServer({ familyCode, dataDir }) {
     next();
   }
 
-  function requireConversation(req, res, next) {
-    const ids = participants(db, req.params.id);
-    if (!ids || !ids.includes(req.user.id)) {
-      return res.status(404).json({ error: '대화방을 찾을 수 없습니다.' });
-    }
-    req.participants = ids;
-    next();
-  }
-
   function broadcast(userIds, payload) {
     const data = JSON.stringify(payload);
     for (const id of userIds) {
@@ -150,15 +111,8 @@ export function createServer({ familyCode, dataDir }) {
     return name;
   }
 
-  function saveMessage(conversationId, senderId, kind, text, image, recipients) {
-    const { lastInsertRowid } = db
-      .prepare(
-        'INSERT INTO messages (conversation_id, sender_id, kind, text, image, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      )
-      .run(conversationId, senderId, kind, text, image, Date.now());
-    const message = toMessage(db.prepare(`${MESSAGE_SELECT} WHERE m.id = ?`).get(lastInsertRowid));
-    broadcast(recipients, { type: 'message', message });
-    return message;
+  function removeFiles(names) {
+    for (const name of names) fs.rmSync(path.join(uploadDir, name), { force: true });
   }
 
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
@@ -209,51 +163,36 @@ export function createServer({ familyCode, dataDir }) {
     res.json(db.prepare('SELECT * FROM users ORDER BY display_name').all().map(toUser));
   });
 
-  app.get('/api/conversations', auth, (req, res) => {
-    const last = db.prepare(`${MESSAGE_SELECT} WHERE m.conversation_id = ? ORDER BY m.id DESC LIMIT 1`);
-    const lastMessage = (id) => {
-      const row = last.get(id);
-      return row ? toMessage(row) : null;
-    };
-    const others = db.prepare('SELECT * FROM users WHERE id != ? ORDER BY display_name').all(req.user.id);
-    const conversations = [
-      { id: GROUP_ID, kind: 'group', title: '우리 가족', lastMessage: lastMessage(GROUP_ID) },
-      ...others.map((u) => {
-        const id = directId(req.user.id, u.id);
-        return { id, kind: 'direct', title: u.display_name, lastMessage: lastMessage(id) };
-      }),
-    ];
-    res.json(conversations);
+  /** Tells everyone a profile changed (name or photo). */
+  const profileChanged = (id) =>
+    broadcastAll({ type: 'user', user: toUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id)) });
+
+  app.patch('/api/me', auth, (req, res) => {
+    const name = typeof req.body?.displayName === 'string' ? req.body.displayName.trim() : '';
+    if (name.length < 1 || name.length > 20) return res.status(400).json({ error: '이름은 1~20자로 입력하세요.' });
+    db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(name, req.user.id);
+    profileChanged(req.user.id);
+    res.json(toUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)));
   });
 
-  app.get('/api/conversations/:id/messages', auth, requireConversation, (req, res) => {
-    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
-    const before = Number(req.query.before) || Number.MAX_SAFE_INTEGER;
-    const rows = db
-      .prepare(`${MESSAGE_SELECT} WHERE m.conversation_id = ? AND m.id < ? ORDER BY m.id DESC LIMIT ?`)
-      .all(req.params.id, before, limit);
-    res.json(rows.reverse().map(toMessage));
+  app.post('/api/me/avatar', auth, express.raw({ type: Object.keys(IMAGE_TYPES), limit: '10mb' }), (req, res) => {
+    const name =
+      Buffer.isBuffer(req.body) && req.body.length > 0 ? saveFile(req.body, req.get('content-type'), IMAGE_TYPES) : null;
+    if (!name) return res.status(400).json({ error: '지원하지 않는 이미지 형식입니다.' });
+    const old = db.prepare('SELECT avatar FROM users WHERE id = ?').get(req.user.id).avatar;
+    db.prepare('UPDATE users SET avatar = ? WHERE id = ?').run(name, req.user.id);
+    if (old) removeFiles([old]);
+    profileChanged(req.user.id);
+    res.json(toUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)));
   });
 
-  app.post('/api/conversations/:id/messages', auth, requireConversation, (req, res) => {
-    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
-    if (!text) return res.status(400).json({ error: '메시지를 입력하세요.' });
-    if (text.length > MAX_TEXT) return res.status(400).json({ error: '메시지가 너무 깁니다.' });
-    res.status(201).json(saveMessage(req.params.id, req.user.id, 'text', text, null, req.participants));
+  app.delete('/api/me/avatar', auth, (req, res) => {
+    const old = db.prepare('SELECT avatar FROM users WHERE id = ?').get(req.user.id).avatar;
+    db.prepare('UPDATE users SET avatar = NULL WHERE id = ?').run(req.user.id);
+    if (old) removeFiles([old]);
+    profileChanged(req.user.id);
+    res.json(toUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)));
   });
-
-  app.post(
-    '/api/conversations/:id/images',
-    auth,
-    requireConversation,
-    express.raw({ type: Object.keys(IMAGE_TYPES), limit: '15mb' }),
-    (req, res) => {
-      const name =
-        Buffer.isBuffer(req.body) && req.body.length > 0 ? saveFile(req.body, req.get('content-type'), IMAGE_TYPES) : null;
-      if (!name) return res.status(400).json({ error: '지원하지 않는 이미지 형식입니다.' });
-      res.status(201).json(saveMessage(req.params.id, req.user.id, 'image', null, name, req.participants));
-    },
-  );
 
   // Serves chat photos and story photos/videos. sendFile supports Range requests for video seeking.
   app.get(['/api/images/:name', '/api/media/:name'], auth, (req, res) => {
@@ -262,7 +201,10 @@ export function createServer({ familyCode, dataDir }) {
     // Story media is visible to the whole family once posted (before that, only to the uploader);
     // chat photos only to that conversation.
     const story = db.prepare('SELECT uploader_id, post_id FROM media WHERE name = ?').get(name);
-    if (story) {
+    const isAvatar = db.prepare('SELECT 1 FROM users WHERE avatar = ?').get(name);
+    if (isAvatar) {
+      // Profile photos are visible to the whole family.
+    } else if (story) {
       if (story.post_id === null && story.uploader_id !== req.user.id) return res.status(404).end();
     } else {
       const row = db.prepare('SELECT conversation_id FROM messages WHERE image = ?').get(name);
@@ -273,7 +215,17 @@ export function createServer({ familyCode, dataDir }) {
     res.sendFile(path.join(uploadDir, name));
   });
 
-  registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes: Object.keys(MEDIA_TYPES) });
+  registerChatRoutes(app, { db, auth, broadcast, saveFile, removeFiles, imageTypes: IMAGE_TYPES });
+  registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes: Object.keys(MEDIA_TYPES), now });
+  const family = registerFamilyRoutes(app, {
+    db,
+    auth,
+    broadcastAll,
+    sendTo: (userId, payload) => broadcast([userId], payload),
+    connectedUserIds: () => [...sockets.keys()],
+    now,
+    reminderHour,
+  });
 
   app.use((err, _req, res, _next) => {
     if (err.type === 'entity.too.large') return res.status(413).json({ error: '파일이 너무 큽니다.' });
@@ -306,6 +258,8 @@ export function createServer({ familyCode, dataDir }) {
         if (set?.size === 0) sockets.delete(user.id);
       });
       ws.send(JSON.stringify({ type: 'hello', user }));
+      // Deliver today's calendar and memory reminders as soon as the phone connects.
+      family.remind(user.id);
     });
   });
 
@@ -323,6 +277,7 @@ export function createServer({ familyCode, dataDir }) {
   server.on('close', () => {
     clearInterval(heartbeat);
     app.locals.stopCleanup?.();
+    family.stop();
     for (const ws of wss.clients) ws.terminate();
     db.close();
   });

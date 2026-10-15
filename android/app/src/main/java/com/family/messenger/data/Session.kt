@@ -27,6 +27,14 @@ class Session(context: Context) {
         _auth.value = Auth(serverUrl, response.token, response.user)
     }
 
+    /** Keeps the stored user in sync after a name or photo change. */
+    fun updateUser(user: User) {
+        val current = _auth.value ?: return
+        if (current.user.id != user.id) return
+        prefs.edit().putString(KEY_USER, Api.json.encodeToString(user)).apply()
+        _auth.value = current.copy(user = user)
+    }
+
     fun clear() {
         prefs.edit().remove(KEY_TOKEN).remove(KEY_USER).apply()
         _auth.value = null

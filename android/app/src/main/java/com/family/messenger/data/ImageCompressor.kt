@@ -16,9 +16,9 @@ import kotlin.math.roundToInt
 object ImageCompressor {
     private const val MAX_SIDE = 1600
 
-    suspend fun compress(context: Context, uri: Uri): ByteArray = withContext(Dispatchers.IO) {
+    suspend fun compress(context: Context, uri: Uri, maxSide: Int = MAX_SIDE): ByteArray = withContext(Dispatchers.IO) {
         val bitmap = decode(context, uri) ?: throw ApiException("사진을 열 수 없습니다.")
-        toJpeg(bitmap)
+        toJpeg(bitmap, maxSide)
     }
 
     /** Scales [bitmap] down to [maxSide] if needed, encodes it as JPEG and recycles it. */
