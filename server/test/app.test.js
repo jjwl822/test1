@@ -128,8 +128,8 @@ test('story feed', async () => {
   assert.equal(post.authorName, '엄마');
   assert.deepEqual(post.reactions, { heart: 0, like: 0, dislike: 0 });
   assert.deepEqual(post.media, [
-    { url: `/api/media/${p1}`, kind: 'image', posterUrl: null },
-    { url: `/api/media/${video}`, kind: 'video', posterUrl: `/api/media/${poster}` },
+    { name: p1, url: `/api/media/${p1}`, kind: 'image', posterUrl: null },
+    { name: video, url: `/api/media/${video}`, kind: 'video', posterUrl: `/api/media/${poster}` },
   ]);
   // Can't reuse uploads already attached to a post
   assert.equal((await call('POST', '/api/posts', { token: mom.token, json: { media: [{ name: p1 }] } })).status, 400);
@@ -181,4 +181,47 @@ test('story feed', async () => {
   assert.ok(types.includes('post'));
   assert.ok(types.includes('comment'));
   assert.ok(types.includes('feed'));
+});
+
+test('editing a story', async () => {
+  const login = (u) => call('POST', '/api/login', { json: { username: u, password: 'pass1234' } }).then((r) => r.data);
+  const mom = await login('mom');
+  const dad = await login('dad');
+  const png = Buffer.from('89504e470d0a1a0a', 'hex');
+  const upload = async (token, type = 'image/png', body = png) =>
+    (await call('POST', '/api/media', { token, body, type })).data.name;
+
+  const a = await upload(mom.token);
+  const b = await upload(mom.token);
+  const post = (await call('POST', '/api/posts', { token: mom.token, json: { text: '원래 글', media: [{ name: a }, { name: b }] } })).data;
+  assert.equal(post.editedAt, null);
+  assert.deepEqual(post.media.map((m) => m.name), [a, b]);
+
+  const patch = (token, json) => call('PATCH', `/api/posts/${post.id}`, { token, json });
+  assert.equal((await patch(dad.token, { text: '해킹' })).status, 403);
+  assert.equal((await patch(mom.token, { text: '', media: [] })).status, 400);
+
+  // Remove a, keep b, add a new video with poster, reorder
+  const video = await upload(mom.token, 'video/mp4', Buffer.from('000000186674797069736f6d', 'hex'));
+  const poster = await upload(mom.token);
+  const edited = await patch(mom.token, { text: '고친 글', media: [{ name: video, poster }, { name: b }] });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.data.text, '고친 글');
+  assert.ok(edited.data.editedAt);
+  assert.deepEqual(edited.data.media.map((m) => m.name), [video, b]);
+  assert.equal(edited.data.media[0].posterUrl, `/api/media/${poster}`);
+  assert.equal(fs.existsSync(path.join(dataDir, 'uploads', a)), false);
+  assert.equal((await call('GET', `/api/media/${b}`, { token: dad.token })).status, 200);
+
+  // Media from another post can't be pulled in
+  const other = (await call('POST', '/api/posts', { token: mom.token, json: { media: [{ name: await upload(mom.token) }] } })).data;
+  assert.equal((await patch(mom.token, { media: [{ name: other.media[0].name }] })).status, 400);
+
+  const summary = (await call('GET', '/api/feed/summary', { token: dad.token })).data;
+  assert.equal(summary.members, 3);
+  assert.ok(summary.posts >= 2);
+
+  // Removing the video also removes its poster frame
+  await patch(mom.token, { text: '글만', media: [] });
+  for (const name of [video, poster, b]) assert.equal(fs.existsSync(path.join(dataDir, 'uploads', name)), false);
 });

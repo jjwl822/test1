@@ -11,16 +11,23 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,6 +38,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.family.messenger.data.MessageBus
 import com.family.messenger.data.User
@@ -132,19 +141,44 @@ private fun Home(app: FamilyApp, me: User, tab: Int, onTab: (Int) -> Unit, onOpe
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = tab == TAB_CHATS,
-                    onClick = { onTab(TAB_CHATS) },
-                    icon = { Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null) },
-                    label = { Text("채팅") },
-                )
-                NavigationBarItem(
-                    selected = tab == TAB_STORY,
-                    onClick = { onTab(TAB_STORY) },
-                    icon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },
-                    label = { Text("스토리") },
-                )
+            // Instagram-style bar: plain background, hairline on top, filled icon when selected.
+            Column {
+                HorizontalDivider()
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+                    val colors = NavigationBarItemDefaults.colors(
+                        indicatorColor = Color.Transparent,
+                        selectedIconColor = MaterialTheme.colorScheme.onSurface,
+                        selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unselectedIconColor = MaterialTheme.colorScheme.onSurface,
+                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    NavigationBarItem(
+                        selected = tab == TAB_CHATS,
+                        onClick = { onTab(TAB_CHATS) },
+                        icon = {
+                            Icon(
+                                if (tab == TAB_CHATS) Icons.Filled.ChatBubble else Icons.Outlined.ChatBubbleOutline,
+                                contentDescription = null,
+                                modifier = Modifier.size(26.dp),
+                            )
+                        },
+                        label = { Text("채팅") },
+                        colors = colors,
+                    )
+                    NavigationBarItem(
+                        selected = tab == TAB_STORY,
+                        onClick = { onTab(TAB_STORY) },
+                        icon = {
+                            Icon(
+                                if (tab == TAB_STORY) Icons.Filled.PhotoLibrary else Icons.Outlined.PhotoLibrary,
+                                contentDescription = null,
+                                modifier = Modifier.size(26.dp),
+                            )
+                        },
+                        label = { Text("스토리") },
+                        colors = colors,
+                    )
+                }
             }
         },
     ) { padding ->

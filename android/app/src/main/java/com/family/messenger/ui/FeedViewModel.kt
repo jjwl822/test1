@@ -7,9 +7,11 @@ import androidx.lifecycle.viewModelScope
 import com.family.messenger.FamilyApp
 import com.family.messenger.data.ApiException
 import com.family.messenger.data.Comment
+import com.family.messenger.data.FeedSummary
 import com.family.messenger.data.ImageCompressor
 import com.family.messenger.data.MessageBus
 import com.family.messenger.data.Post
+import com.family.messenger.data.PostMedia
 import com.family.messenger.data.VideoCompressor
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,6 +19,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+
+/** An item in the post editor: media already in the post, or something picked from the phone. */
+sealed interface MediaDraft {
+    val key: String
+
+    data class Existing(val media: PostMedia) : MediaDraft {
+        override val key get() = "e:${media.name}"
+    }
+
+    data class Local(val uri: Uri) : MediaDraft {
+        override val key get() = "l:$uri"
+    }
+}
 
 class FeedViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -31,6 +46,7 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
         /** Post whose comments sheet is open, and its comments. */
         val commentsFor: Long? = null,
         val comments: List<Comment> = emptyList(),
+        val summary: FeedSummary? = null,
     )
 
     private val app = application as FamilyApp
@@ -47,6 +63,7 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
         try {
             val posts = app.api.posts()
             _state.value = _state.value.copy(posts = posts, loading = false, hasOlder = posts.size >= PAGE, error = null)
+            loadSummary()
         } catch (e: Exception) {
             _state.value = _state.value.copy(loading = false, error = e.message)
         }
@@ -63,48 +80,66 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Shrinks each photo/video, uploads them one at a time (to keep memory low), then creates the
-     * post. Calls [onDone] once it is published so the composer can close.
+     * Creates a post, or saves changes to [editing]. New photos/videos are shrunk and uploaded one at
+     * a time (to keep memory low); media already in the post is kept as is. Calls [onDone] when saved.
      */
-    fun create(text: String, items: List<Uri>, onDone: () -> Unit) = viewModelScope.launch {
+    fun save(editing: Post?, text: String, drafts: List<MediaDraft>, onDone: () -> Unit) = viewModelScope.launch {
         _state.value = _state.value.copy(posting = true, error = null)
         fun status(text: String) {
             _state.value = _state.value.copy(progress = text)
         }
         try {
-            val uploaded = items.mapIndexed { index, uri ->
-                val step = "${index + 1}/${items.size}"
-                if (app.contentResolver.getType(uri)?.startsWith("video/") == true) {
-                    status("동영상 줄이는 중 $step")
-                    val video = VideoCompressor.compress(app, uri) { percent -> status("동영상 줄이는 중 $step · $percent%") }
-                    try {
-                        if (video.video.length() > MAX_VIDEO_BYTES) throw ApiException("동영상이 너무 깁니다. 더 짧게 잘라서 올려주세요.")
-                        status("업로드 중 $step")
-                        val poster = app.api.uploadPhoto(video.poster)
-                        app.api.uploadVideo(video.video).name to poster.name
-                    } finally {
-                        video.video.delete()
+            val total = drafts.count { it is MediaDraft.Local }
+            var done = 0
+            val media = drafts.map { draft ->
+                when (draft) {
+                    is MediaDraft.Existing -> draft.media.name to null
+                    is MediaDraft.Local -> {
+                        val step = "${++done}/$total"
+                        upload(draft.uri, step, ::status)
                     }
-                } else {
-                    status("사진 줄이는 중 $step")
-                    val jpeg = ImageCompressor.compress(app, uri)
-                    status("업로드 중 $step")
-                    app.api.uploadPhoto(jpeg).name to null
                 }
             }
-            status("올리는 중")
-            upsert(app.api.createPost(text, uploaded))
+            status(if (editing != null) "저장하는 중" else "올리는 중")
+            val saved = if (editing != null) app.api.updatePost(editing.id, text, media) else app.api.createPost(text, media)
+            upsert(saved)
+            loadSummary()
             onDone()
         } catch (e: Exception) {
-            _state.value = _state.value.copy(error = e.message ?: "올리지 못했습니다.")
+            _state.value = _state.value.copy(error = e.message ?: "저장하지 못했습니다.")
         } finally {
             _state.value = _state.value.copy(posting = false, progress = null)
         }
     }
 
+    /** Returns the upload name, plus the poster frame's upload name for videos. */
+    private suspend fun upload(uri: Uri, step: String, status: (String) -> Unit): Pair<String, String?> {
+        if (app.contentResolver.getType(uri)?.startsWith("video/") == true) {
+            status("동영상 줄이는 중 $step")
+            val video = VideoCompressor.compress(app, uri) { percent -> status("동영상 줄이는 중 $step · $percent%") }
+            try {
+                if (video.video.length() > MAX_VIDEO_BYTES) throw ApiException("동영상이 너무 깁니다. 더 짧게 잘라서 올려주세요.")
+                status("업로드 중 $step")
+                val poster = app.api.uploadPhoto(video.poster)
+                return app.api.uploadVideo(video.video).name to poster.name
+            } finally {
+                video.video.delete()
+            }
+        }
+        status("사진 줄이는 중 $step")
+        val jpeg = ImageCompressor.compress(app, uri)
+        status("업로드 중 $step")
+        return app.api.uploadPhoto(jpeg).name to null
+    }
+
     fun delete(post: Post) = action {
         app.api.deletePost(post.id)
         remove(post.id)
+        loadSummary()
+    }
+
+    private suspend fun loadSummary() {
+        runCatching { app.api.feedSummary() }.onSuccess { _state.value = _state.value.copy(summary = it) }
     }
 
     fun react(post: Post, kind: String) = action { upsert(app.api.react(post.id, kind)) }
@@ -143,11 +178,14 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
     /** Someone added, changed or deleted a post: fetch it again (with my own reaction state). */
     private fun reloadPost(id: Long) = viewModelScope.launch {
         try {
+            val known = _state.value.posts.any { it.id == id }
             upsert(app.api.post(id))
+            if (!known) loadSummary()
             if (_state.value.commentsFor == id) loadComments(id)
         } catch (e: ApiException) {
             if (e.code == 404) {
                 remove(id)
+                loadSummary()
                 if (_state.value.commentsFor == id) closeComments()
             }
         }

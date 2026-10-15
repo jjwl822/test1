@@ -1,6 +1,7 @@
 package com.family.messenger.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,7 +19,6 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -38,7 +38,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.family.messenger.FamilyApp
 import com.family.messenger.data.Conversation
 import com.family.messenger.data.MessageBus
@@ -71,7 +73,7 @@ fun ConversationsScreen(app: FamilyApp, me: User, onOpen: (id: String, title: St
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("가족 메신저") },
+                title = { Text("가족 메신저", style = MaterialTheme.typography.titleLarge) },
                 actions = {
                     IconButton(onClick = { confirmLogout = true }) {
                         Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "로그아웃")
@@ -103,7 +105,6 @@ fun ConversationsScreen(app: FamilyApp, me: User, onOpen: (id: String, title: St
                 error?.let { item { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) } }
                 items(conversations, key = { it.id }) { conversation ->
                     ConversationRow(conversation) { onOpen(conversation.id, conversation.title) }
-                    HorizontalDivider(Modifier.padding(start = 76.dp))
                 }
                 if (conversations.size == 1) {
                     item {
@@ -148,7 +149,7 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Avatar(conversation.title, conversation.isGroup)
+        Avatar(conversation.title, conversation.isGroup, size = 56.dp, ring = conversation.lastMessage != null)
         Column(Modifier.weight(1f)) {
             Text(conversation.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             val last = conversation.lastMessage
@@ -170,20 +171,30 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
     }
 }
 
+/** Round avatar with the person's first letter; [ring] adds Instagram's story gradient around it. */
 @Composable
-fun Avatar(name: String, isGroup: Boolean = false) {
+fun Avatar(name: String, isGroup: Boolean = false, size: Dp = 48.dp, ring: Boolean = false) {
+    val ringWidth = if (ring) (size.value / 20f).coerceAtLeast(2f).dp else 0.dp
     Box(
         modifier = Modifier
-            .size(48.dp)
+            .size(size)
+            .then(if (ring) Modifier.border(ringWidth, StoryGradient, CircleShape) else Modifier)
+            .padding(ringWidth * 1.5f)
             .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         if (isGroup) {
-            Icon(Icons.Filled.Groups, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            Icon(
+                Icons.Filled.Groups,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(size * 0.5f),
+            )
         } else {
             Text(
                 name.take(1),
-                style = MaterialTheme.typography.titleMedium,
+                fontSize = (size.value * 0.4f).sp,
+                fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
         }

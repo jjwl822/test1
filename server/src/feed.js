@@ -36,8 +36,11 @@ export function registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uplo
       authorId: row.author_id,
       authorName: row.author_name,
       text: row.text,
-      media: postMedia.all(row.id).map((m) => ({ url: mediaUrl(m.name), kind: m.kind, posterUrl: mediaUrl(m.poster) })),
+      media: postMedia
+        .all(row.id)
+        .map((m) => ({ name: m.name, url: mediaUrl(m.name), kind: m.kind, posterUrl: mediaUrl(m.poster) })),
       createdAt: row.created_at,
+      editedAt: row.edited_at ?? null,
       commentCount: row.comment_count,
       reactions: counts,
       myReactions: myReactions.all(row.id, viewerId).map((r) => r.kind),
@@ -77,6 +80,13 @@ export function registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uplo
     res.json(rows.map((r) => toPost(r, req.user.id)));
   });
 
+  // Counts for the top of the story grid.
+  app.get('/api/feed/summary', auth, (_req, res) => {
+    const posts = db.prepare('SELECT COUNT(*) AS n FROM posts').get().n;
+    const members = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+    res.json({ posts, members });
+  });
+
   app.get('/api/posts/:id', auth, requirePost, (req, res) => res.json(req.post));
 
   // Step 1: upload each photo or video (and each video's poster frame) as a raw body.
@@ -94,52 +104,109 @@ export function registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uplo
     res.status(201).json({ name, kind });
   });
 
-  // Step 2: create the post. Body: { text, media: [{ name, poster? }] } using names from step 1.
-  app.post('/api/posts', auth, (req, res) => {
-    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
-    const items = Array.isArray(req.body?.media) ? req.body.media : [];
-    if (text.length > MAX_POST_TEXT) return res.status(400).json({ error: '글이 너무 깁니다.' });
-    if (!text && items.length === 0) return res.status(400).json({ error: '사진이나 글을 입력하세요.' });
-    if (items.length > MAX_MEDIA) return res.status(400).json({ error: `사진과 동영상은 ${MAX_MEDIA}개까지 올릴 수 있습니다.` });
+  const upload = db.prepare('SELECT * FROM media WHERE name = ? AND uploader_id = ? AND post_id IS NULL');
+  const ownMedia = db.prepare('SELECT * FROM media WHERE name = ? AND post_id = ? AND position IS NOT NULL');
+  const attach = db.prepare('UPDATE media SET post_id = ?, position = ?, poster = ? WHERE name = ?');
 
-    const upload = db.prepare('SELECT * FROM media WHERE name = ? AND uploader_id = ? AND post_id IS NULL');
+  /**
+   * Validates a post body { text, media: [{ name, poster? }] }. Each item is either a fresh upload
+   * of mine (step 1) or, when editing, an item already in this post. Returns { error } or the parts.
+   */
+  function parsePost(body, userId, postId = null) {
+    const text = typeof body?.text === 'string' ? body.text.trim() : '';
+    const items = Array.isArray(body?.media) ? body.media : [];
+    if (text.length > MAX_POST_TEXT) return { error: '글이 너무 깁니다.' };
+    if (!text && items.length === 0) return { error: '사진이나 글을 입력하세요.' };
+    if (items.length > MAX_MEDIA) return { error: `사진과 동영상은 ${MAX_MEDIA}개까지 올릴 수 있습니다.` };
+
     const seen = new Set();
-    const usable = (name, kind) => {
+    const fresh = (name, kind) => {
       if (typeof name !== 'string' || seen.has(name)) return false;
-      const row = upload.get(name, req.user.id);
+      const row = upload.get(name, userId);
       if (!row || (kind && row.kind !== kind)) return false;
       seen.add(name);
       return row;
     };
-    const resolved = [];
+    const media = [];
     for (const item of items) {
-      const row = usable(item?.name);
-      const poster = item?.poster == null ? null : usable(item.poster, 'image');
-      if (!row || poster === false || (poster && row.kind !== 'video')) {
-        return res.status(400).json({ error: '업로드한 파일을 찾을 수 없습니다. 다시 시도하세요.' });
+      const kept = postId !== null && typeof item?.name === 'string' && !seen.has(item.name) && ownMedia.get(item.name, postId);
+      if (kept) {
+        seen.add(kept.name);
+        media.push({ name: kept.name, existing: true });
+        continue;
       }
-      resolved.push({ name: row.name, poster: poster ? poster.name : null });
+      const row = fresh(item?.name);
+      const poster = item?.poster == null ? null : fresh(item.poster, 'image');
+      if (!row || poster === false || (poster && row.kind !== 'video')) {
+        return { error: '업로드한 파일을 찾을 수 없습니다. 다시 시도하세요.' };
+      }
+      media.push({ name: row.name, poster: poster ? poster.name : null, existing: false });
     }
+    return { text, media };
+  }
 
-    const attach = db.prepare('UPDATE media SET post_id = ?, position = ?, poster = ? WHERE name = ?');
+  function transaction(fn) {
     db.exec('BEGIN');
-    let postId;
     try {
-      postId = db
-        .prepare('INSERT INTO posts (author_id, text, created_at) VALUES (?, ?, ?)')
-        .run(req.user.id, text, Date.now()).lastInsertRowid;
-      resolved.forEach((m, i) => {
-        attach.run(postId, i, m.poster, m.name);
-        if (m.poster) attach.run(postId, null, null, m.poster);
-      });
+      const result = fn();
       db.exec('COMMIT');
+      return result;
     } catch (err) {
       db.exec('ROLLBACK');
       throw err;
     }
+  }
+
+  /** Puts the post's media in the given order, attaching fresh uploads with their poster frames. */
+  function placeMedia(postId, media) {
+    media.forEach((m, i) => {
+      if (m.existing) {
+        db.prepare('UPDATE media SET position = ? WHERE name = ?').run(i, m.name);
+      } else {
+        attach.run(postId, i, m.poster, m.name);
+        if (m.poster) attach.run(postId, null, null, m.poster);
+      }
+    });
+  }
+
+  // Step 2: create the post. Body: { text, media: [{ name, poster? }] } using names from step 1.
+  app.post('/api/posts', auth, (req, res) => {
+    const parsed = parsePost(req.body, req.user.id);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const postId = transaction(() => {
+      const id = db
+        .prepare('INSERT INTO posts (author_id, text, created_at) VALUES (?, ?, ?)')
+        .run(req.user.id, parsed.text, Date.now()).lastInsertRowid;
+      placeMedia(id, parsed.media);
+      return id;
+    });
     const post = findPost(postId, req.user.id);
     broadcastAll({ type: 'post', postId: post.id, authorId: req.user.id, authorName: req.user.displayName });
     res.status(201).json(post);
+  });
+
+  // Edit: same body as creating. Items left out of `media` are removed from the post.
+  app.patch('/api/posts/:id', auth, requirePost, (req, res) => {
+    if (req.post.authorId !== req.user.id) return res.status(403).json({ error: '내가 올린 글만 수정할 수 있습니다.' });
+    const postId = req.post.id;
+    const parsed = parsePost(req.body, req.user.id, postId);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+    const kept = new Set(parsed.media.filter((m) => m.existing).map((m) => m.name));
+    const removedFiles = transaction(() => {
+      const current = db
+        .prepare('SELECT name, poster FROM media WHERE post_id = ? AND position IS NOT NULL')
+        .all(postId);
+      const removed = current.filter((m) => !kept.has(m.name)).flatMap((m) => [m.name, m.poster].filter(Boolean));
+      const drop = db.prepare('DELETE FROM media WHERE name = ?');
+      for (const name of removed) drop.run(name);
+      placeMedia(postId, parsed.media);
+      db.prepare('UPDATE posts SET text = ?, edited_at = ? WHERE id = ?').run(parsed.text, Date.now(), postId);
+      return removed;
+    });
+    removeFiles(removedFiles);
+    changed(postId);
+    res.json(findPost(postId, req.user.id));
   });
 
   app.delete('/api/posts/:id', auth, requirePost, (req, res) => {

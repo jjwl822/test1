@@ -75,5 +75,8 @@ export function openDatabase(file) {
     INSERT OR IGNORE INTO media (name, uploader_id, kind, post_id, position, created_at)
       SELECT image, author_id, 'image', id, 0, created_at FROM posts WHERE image IS NOT NULL;
   `);
+  // Added after the first release; older databases get the column here.
+  const postColumns = db.prepare('PRAGMA table_info(posts)').all().map((c) => c.name);
+  if (!postColumns.includes('edited_at')) db.exec('ALTER TABLE posts ADD COLUMN edited_at INTEGER');
   return db;
 }

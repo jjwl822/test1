@@ -105,9 +105,23 @@ class Api(private val session: Session) {
     private suspend fun upload(body: RequestBody): Uploaded =
         call(Request.Builder().url(url("/api/media")).post(body).build())
 
-    /** [media] holds upload names, each with the poster frame's upload name for videos. */
-    suspend fun createPost(text: String, media: List<Pair<String, String?>>): Post {
-        val body = buildJsonObject {
+    suspend fun feedSummary(): FeedSummary = call(Request.Builder().url(url("/api/feed/summary")).build())
+
+    /** [media] holds upload names, each with the poster frame's upload name for new videos. */
+    suspend fun createPost(text: String, media: List<Pair<String, String?>>): Post =
+        call(post(url("/api/posts"), postBody(text, media)))
+
+    /** Replaces the post's text and media; [media] may mix names already in the post and new uploads. */
+    suspend fun updatePost(id: Long, text: String, media: List<Pair<String, String?>>): Post =
+        call(
+            Request.Builder()
+                .url(url("/api/posts/$id"))
+                .patch(json.encodeToString(postBody(text, media)).toJsonBody())
+                .build(),
+        )
+
+    private fun postBody(text: String, media: List<Pair<String, String?>>): JsonObject =
+        buildJsonObject {
             put("text", text)
             putJsonArray("media") {
                 for ((name, poster) in media) {
@@ -118,8 +132,6 @@ class Api(private val session: Session) {
                 }
             }
         }
-        return call(post(url("/api/posts"), body))
-    }
 
     suspend fun deletePost(id: Long) {
         call<JsonObject>(Request.Builder().url(url("/api/posts/$id")).delete().build())
