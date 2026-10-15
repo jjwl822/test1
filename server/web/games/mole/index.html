@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>두더지 잡기</title>
+  <style>
+    :root { --bg: #eaf7e4; --fg: #2b2b2b; --muted: #6f7f68; --dirt: #7a4b2a; --hole: #3b2414; --accent: #0095f6; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #102010; --fg: #eef6ea; --muted: #9db394; } }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); touch-action: manipulation;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; user-select: none; -webkit-user-select: none; }
+    main { max-width: 480px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); display: flex; flex-direction: column; gap: 16px; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 22px; margin: 0; }
+    .stats { display: flex; gap: 14px; color: var(--muted); }
+    .stats b { color: var(--fg); font-size: 20px; }
+    .bar { height: 8px; border-radius: 4px; background: rgba(0,0,0,.1); overflow: hidden; }
+    .bar i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #34c759, #ffcc00, #ff3b30); transition: width .2s linear; }
+    .field { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .hole { aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 50% 70%, var(--hole) 0 45%, var(--dirt) 46% 100%);
+      position: relative; overflow: hidden; border: 0; padding: 0; cursor: pointer; }
+    .mole { position: absolute; left: 50%; bottom: -70%; transform: translateX(-50%); font-size: clamp(42px, 15vw, 64px); transition: bottom .12s ease-out; pointer-events: none; }
+    .hole.up .mole { bottom: 12%; }
+    .hole.hit .mole { filter: grayscale(1) brightness(1.4); transform: translateX(-50%) scale(.85); }
+    .pop { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); color: #fff; font-weight: 800; font-size: 20px; animation: up .5s forwards; pointer-events: none; }
+    @keyframes up { to { transform: translate(-50%, -20px); opacity: 0; } }
+    button.primary { background: var(--accent); color: #fff; border: 0; border-radius: 10px; padding: 12px; font-size: 16px; font-weight: 700; width: 100%; }
+    button.primary:disabled { opacity: .35; }
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; padding: 20px; }
+    .overlay.show { display: flex; }
+    .panel { background: var(--bg); border-radius: 16px; padding: 20px; width: 100%; max-width: 360px; text-align: center; }
+    .panel h2 { margin: 0 0 4px; font-size: 24px; }
+    .panel p { margin: 0 0 14px; color: var(--muted); }
+    .record { color: #ff3040; font-weight: 700; }
+    .board-title { font-weight: 700; margin: 4px 0; text-align: left; }
+    #rank { margin-bottom: 14px; max-height: 40vh; overflow: auto; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>🐹 두더지 잡기</h1>
+      <div class="stats"><span>잡은 수 <b id="score">0</b></span><span><b id="left">30</b>초</span></div>
+    </header>
+    <div class="bar"><i id="bar"></i></div>
+    <div class="field" id="field"></div>
+    <button class="primary" id="start">시작!</button>
+  </main>
+
+  <div class="overlay" id="overlay">
+    <div class="panel">
+      <h2>⏰ 끝!</h2>
+      <p id="summary"></p>
+      <div class="board-title">👨‍👩‍👧 우리 가족 순위</div>
+      <div id="rank">불러오는 중…</div>
+      <button class="primary" id="again">한 번 더</button>
+    </div>
+  </div>
+
+  <script src="/games/family-games.js"></script>
+  <script>
+    const SECONDS = 30;
+    const field = document.getElementById('field');
+    const holes = [];
+    let score = 0, endAt = 0, running = false, tick = null, spawn = null;
+
+    for (let i = 0; i < 9; i++) {
+      const hole = document.createElement('button');
+      hole.className = 'hole';
+      hole.innerHTML = '<span class="mole">🐹</span>';
+      hole.addEventListener('pointerdown', () => whack(hole));
+      field.appendChild(hole);
+      holes.push(hole);
+    }
+
+    function whack(hole) {
+      if (!running || !hole.classList.contains('up') || hole.classList.contains('hit')) return;
+      hole.classList.add('hit');
+      score++;
+      document.getElementById('score').textContent = score;
+      const pop = document.createElement('span');
+      pop.className = 'pop';
+      pop.textContent = '+1';
+      hole.appendChild(pop);
+      setTimeout(() => pop.remove(), 500);
+      navigator.vibrate?.(15);
+      setTimeout(() => hole.classList.remove('up', 'hit'), 180);
+    }
+
+    function popUp() {
+      if (!running) return;
+      // Faster and shorter as time runs out.
+      const progress = 1 - (endAt - Date.now()) / (SECONDS * 1000);
+      const stay = 900 - progress * 450;
+      const free = holes.filter((h) => !h.classList.contains('up'));
+      const hole = free[Math.floor(Math.random() * free.length)];
+      if (hole) {
+        hole.classList.add('up');
+        setTimeout(() => hole.classList.remove('up', 'hit'), stay);
+      }
+      spawn = setTimeout(popUp, 650 - progress * 300);
+    }
+
+    function start() {
+      score = 0;
+      document.getElementById('score').textContent = '0';
+      document.getElementById('overlay').classList.remove('show');
+      document.getElementById('start').disabled = true;
+      endAt = Date.now() + SECONDS * 1000;
+      running = true;
+      tick = setInterval(() => {
+        const left = Math.max(0, endAt - Date.now());
+        document.getElementById('left').textContent = Math.ceil(left / 1000);
+        document.getElementById('bar').style.width = `${(left / (SECONDS * 1000)) * 100}%`;
+        if (left === 0) finish();
+      }, 100);
+      popUp();
+    }
+
+    async function finish() {
+      running = false;
+      clearInterval(tick);
+      clearTimeout(spawn);
+      holes.forEach((h) => h.classList.remove('up', 'hit'));
+      document.getElementById('start').disabled = false;
+      document.getElementById('summary').textContent = `두더지 ${score}마리를 잡았어요!`;
+      document.getElementById('overlay').classList.add('show');
+      const rank = document.getElementById('rank');
+      const result = await FamilyGames.submitScore(score);
+      if (!result) {
+        rank.textContent = '순위를 불러올 수 없어요.';
+        return;
+      }
+      if (result.record) document.getElementById('summary').innerHTML += '<br><span class="record">🏆 내 최고 기록!</span>';
+      FamilyGames.renderLeaderboard(rank, result);
+    }
+
+    document.getElementById('start').addEventListener('click', start);
+    document.getElementById('again').addEventListener('click', start);
+  </script>
+</body>
+</html>

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>짝 맞추기</title>
+  <style>
+    :root { --bg: #fff8f0; --fg: #2b2b2b; --card: #ff7a59; --face: #ffffff; --muted: #8a8a8a; --accent: #0095f6; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #15120f; --fg: #f4f0ea; --face: #2a2622; --muted: #a39b91; } }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; user-select: none; -webkit-user-select: none; }
+    main { max-width: 480px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 22px; margin: 0; }
+    .stats { display: flex; gap: 14px; font-size: 15px; color: var(--muted); }
+    .stats b { color: var(--fg); font-size: 18px; }
+    .board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; perspective: 800px; }
+    .card { aspect-ratio: 3 / 4; position: relative; border: 0; padding: 0; background: none; cursor: pointer; }
+    .card .inner { position: absolute; inset: 0; transition: transform .35s; transform-style: preserve-3d; }
+    .card.open .inner, .card.done .inner { transform: rotateY(180deg); }
+    .card .side { position: absolute; inset: 0; border-radius: 12px; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+      display: grid; place-items: center; box-shadow: 0 2px 6px rgba(0,0,0,.15); }
+    .card .back { background: linear-gradient(135deg, #ffb36b, var(--card) 60%, #d62976); color: #fff; font-size: 26px; }
+    .card .front { background: var(--face); transform: rotateY(180deg); font-size: clamp(28px, 10vw, 44px); }
+    .card.done .front { box-shadow: 0 0 0 3px #34c759 inset; }
+    button.primary { background: var(--accent); color: #fff; border: 0; border-radius: 10px; padding: 12px; font-size: 16px; font-weight: 700; width: 100%; }
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; padding: 20px; }
+    .overlay.show { display: flex; }
+    .panel { background: var(--bg); border-radius: 16px; padding: 20px; width: 100%; max-width: 360px; text-align: center; }
+    .panel h2 { margin: 0 0 4px; font-size: 24px; }
+    .panel p { margin: 0 0 14px; color: var(--muted); }
+    .record { color: #ff3040; font-weight: 700; }
+    .board-title { font-weight: 700; margin: 4px 0; text-align: left; }
+    #rank { margin-bottom: 14px; max-height: 40vh; overflow: auto; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>🃏 짝 맞추기</h1>
+      <div class="stats"><span>뒤집기 <b id="moves">0</b></span><span><b id="time">0</b>초</span></div>
+    </header>
+    <div class="board" id="board"></div>
+    <button class="primary" id="restart">새 게임</button>
+  </main>
+
+  <div class="overlay" id="overlay">
+    <div class="panel">
+      <h2>🎉 다 찾았어요!</h2>
+      <p id="summary"></p>
+      <div class="board-title">👨‍👩‍👧 우리 가족 순위</div>
+      <div id="rank">불러오는 중…</div>
+      <button class="primary" id="again">한 번 더</button>
+    </div>
+  </div>
+
+  <script src="/games/family-games.js"></script>
+  <script>
+    const EMOJIS = ['🍎', '🐶', '🌻', '⭐', '🎈', '🍰', '🚗', '🐱'];
+    const board = document.getElementById('board');
+    const movesEl = document.getElementById('moves');
+    const timeEl = document.getElementById('time');
+    let open = [], moves = 0, found = 0, started = 0, timer = null, locked = false;
+
+    function shuffle(list) {
+      for (let i = list.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [list[i], list[j]] = [list[j], list[i]];
+      }
+      return list;
+    }
+
+    function start() {
+      clearInterval(timer);
+      open = []; moves = 0; found = 0; started = 0; locked = false;
+      movesEl.textContent = '0'; timeEl.textContent = '0';
+      document.getElementById('overlay').classList.remove('show');
+      board.innerHTML = '';
+      for (const emoji of shuffle([...EMOJIS, ...EMOJIS])) {
+        const card = document.createElement('button');
+        card.className = 'card';
+        card.dataset.emoji = emoji;
+        card.innerHTML = `<div class="inner"><div class="side back">?</div><div class="side front">${emoji}</div></div>`;
+        card.addEventListener('click', () => flip(card));
+        board.appendChild(card);
+      }
+    }
+
+    function flip(card) {
+      if (locked || card.classList.contains('open') || card.classList.contains('done')) return;
+      if (!started) {
+        started = Date.now();
+        timer = setInterval(() => (timeEl.textContent = Math.floor((Date.now() - started) / 1000)), 250);
+      }
+      card.classList.add('open');
+      open.push(card);
+      if (open.length < 2) return;
+      moves++;
+      movesEl.textContent = moves;
+      const [a, b] = open;
+      open = [];
+      if (a.dataset.emoji === b.dataset.emoji) {
+        a.classList.add('done'); b.classList.add('done');
+        if (++found === EMOJIS.length) finish();
+      } else {
+        locked = true;
+        setTimeout(() => { a.classList.remove('open'); b.classList.remove('open'); locked = false; }, 700);
+      }
+    }
+
+    async function finish() {
+      clearInterval(timer);
+      const seconds = Math.floor((Date.now() - started) / 1000);
+      document.getElementById('summary').textContent = `${moves}번 뒤집어서 ${seconds}초 만에 성공!`;
+      document.getElementById('overlay').classList.add('show');
+      const rank = document.getElementById('rank');
+      const result = await FamilyGames.submitScore(moves);
+      if (!result) {
+        rank.textContent = '순위를 불러올 수 없어요.';
+        return;
+      }
+      if (result.record) document.getElementById('summary').innerHTML += '<br><span class="record">🏆 내 최고 기록!</span>';
+      FamilyGames.renderLeaderboard(rank, result);
+    }
+
+    document.getElementById('restart').addEventListener('click', start);
+    document.getElementById('again').addEventListener('click', start);
+    start();
+  </script>
+</body>
+</html>

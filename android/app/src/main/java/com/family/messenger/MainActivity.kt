@@ -22,10 +22,12 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -40,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -48,6 +51,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.family.messenger.data.GameInfo
 import com.family.messenger.data.MessageBus
 import com.family.messenger.data.User
 import com.family.messenger.service.MessageService
@@ -57,6 +61,8 @@ import com.family.messenger.ui.ConversationsScreen
 import com.family.messenger.ui.ConversationsViewModel
 import com.family.messenger.ui.FamilyTheme
 import com.family.messenger.ui.FeedScreen
+import com.family.messenger.ui.GamePlayer
+import com.family.messenger.ui.GamesScreen
 import com.family.messenger.ui.ListsScreen
 import com.family.messenger.ui.LoginScreen
 import com.family.messenger.ui.UnreadBadge
@@ -101,6 +107,7 @@ private fun App(app: FamilyApp, pendingChat: MutableStateFlow<Pair<String, Strin
     var chatId by rememberSaveable { mutableStateOf<String?>(null) }
     var chatTitle by rememberSaveable { mutableStateOf("") }
     var tab by rememberSaveable { mutableIntStateOf(TAB_CHATS) }
+    var playing by remember { mutableStateOf<GameInfo?>(null) }
 
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
@@ -147,17 +154,28 @@ private fun App(app: FamilyApp, pendingChat: MutableStateFlow<Pair<String, Strin
     // Shared by the chat list and the unread badge on the tab bar.
     val conversations: ConversationsViewModel = viewModel(key = "conversations-${user.id}") { ConversationsViewModel(app) }
     val openChat = chatId
-    if (openChat != null) {
+    val game = playing
+    if (game != null) {
+        GamePlayer(app, game, onBack = { playing = null })
+    } else if (openChat != null) {
         BackHandler { chatId = null }
         ChatScreen(app, openChat, chatTitle, me = user, onBack = {
             chatId = null
             conversations.refresh()
         })
     } else {
-        Home(app, user, conversations, tab, onTab = { tab = it }, onOpenChat = { id, title ->
-            chatId = id
-            chatTitle = title
-        })
+        Home(
+            app,
+            user,
+            conversations,
+            tab,
+            onTab = { tab = it },
+            onOpenChat = { id, title ->
+                chatId = id
+                chatTitle = title
+            },
+            onPlay = { playing = it },
+        )
     }
 }
 
@@ -165,6 +183,7 @@ private const val TAB_CHATS = 0
 private const val TAB_STORY = 1
 private const val TAB_CALENDAR = 2
 private const val TAB_LISTS = 3
+private const val TAB_GAMES = 4
 
 private data class TabSpec(val label: String, val selected: ImageVector, val unselected: ImageVector)
 
@@ -173,6 +192,7 @@ private val TABS = listOf(
     TabSpec("스토리", Icons.Filled.PhotoLibrary, Icons.Outlined.PhotoLibrary),
     TabSpec("일정", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
     TabSpec("목록", Icons.Filled.Checklist, Icons.Outlined.Checklist),
+    TabSpec("게임", Icons.Filled.SportsEsports, Icons.Outlined.SportsEsports),
 )
 
 @Composable
@@ -183,6 +203,7 @@ private fun Home(
     tab: Int,
     onTab: (Int) -> Unit,
     onOpenChat: (String, String) -> Unit,
+    onPlay: (GameInfo) -> Unit,
 ) {
     val rooms by conversations.conversations.collectAsStateWithLifecycle()
     val unread = rooms.sumOf { it.unreadCount }
@@ -232,6 +253,7 @@ private fun Home(
                 TAB_STORY -> FeedScreen(app, me)
                 TAB_CALENDAR -> CalendarScreen(app)
                 TAB_LISTS -> ListsScreen(app)
+                TAB_GAMES -> GamesScreen(app, onPlay = onPlay)
                 else -> ConversationsScreen(app, me = me, viewModel = conversations, onOpen = onOpenChat)
             }
         }

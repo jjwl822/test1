@@ -171,6 +171,16 @@ data class Comment(
     val createdAt: Long,
 )
 
+/** A game from server/web/games/games.json; [url] is an HTML page on the server. */
+@Serializable
+data class GameInfo(
+    val id: String,
+    val title: String,
+    val emoji: String = "🎮",
+    val description: String = "",
+    val url: String,
+)
+
 @Serializable
 data class SocketEvent(
     val type: String,

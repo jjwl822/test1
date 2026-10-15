@@ -130,7 +130,8 @@ textarea.field { resize: none; min-height: 90px; }
 
 /* ---- Overlays: bottom sheet, dialog, toast, viewer ------------------------------------------- */
 
-.backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 50; display: flex; align-items: flex-end; justify-content: center; animation: fade .15s; }
+/* Sized to the visible area, so on iPhone the keyboard never hides a dialog's buttons. */
+.backdrop { position: fixed; left: 0; right: 0; top: var(--vv-top, 0px); height: var(--app-height); background: rgba(0, 0, 0, 0.45); z-index: 50; display: flex; align-items: flex-end; justify-content: center; animation: fade .15s; }
 .backdrop.middle { align-items: center; padding: 20px; }
 @keyframes fade { from { opacity: 0; } }
 .sheet {
@@ -291,3 +292,11 @@ textarea.field { resize: none; min-height: 90px; }
 .item-row .box { width: 24px; height: 24px; border-radius: 6px; border: 2px solid var(--muted); flex-shrink: 0; display: grid; place-items: center; }
 .item-row .box.on { background: var(--blue); border-color: var(--blue); color: #fff; }
 .item-row.done .text { text-decoration: line-through; color: var(--muted); }
+
+/* ---- Games ----------------------------------------------------------------------------------- */
+
+.games { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.game { display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 14px; background: var(--fill-2); border: 0.5px solid var(--line); text-align: left; width: 100%; }
+.game:active { background: var(--fill); }
+.game .emoji { font-size: 34px; width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center; background: var(--fill); flex-shrink: 0; }
+.game-frame { flex: 1; width: 100%; border: 0; background: var(--bg); }

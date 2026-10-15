@@ -337,7 +337,8 @@ private fun EventEditor(
     val day = LocalDate.parse(date)
 
     AlertDialog(
-        onDismissRequest = { if (!saving) onDismiss() },
+        // Back always closes, even while a save is still on its way on a slow connection.
+        onDismissRequest = onDismiss,
         title = { Text(if (event == null) "일정 추가" else "일정 수정") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -386,7 +387,7 @@ private fun EventEditor(
                 Text("저장", fontWeight = FontWeight.SemiBold)
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !saving) { Text("취소") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } },
     )
 
     if (pickDate) {

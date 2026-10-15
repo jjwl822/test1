@@ -156,6 +156,8 @@ class Api(private val session: Session) {
         call<JsonObject>(Request.Builder().url(url("/api/events/$id")).delete().build())
     }
 
+    suspend fun games(): List<GameInfo> = call(Request.Builder().url(url("/api/games")).build())
+
     suspend fun listItems(): List<ListItem> = call(Request.Builder().url(url("/api/lists/items")).build())
 
     suspend fun addListItem(list: String, text: String): ListItem =

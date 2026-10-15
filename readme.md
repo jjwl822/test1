@@ -96,6 +96,43 @@ FAMILY_CODE=우리집코드 npm start     # 또는 환경 변수로 지정
 
 알림용 키는 `data/vapid.json`에 저장됩니다. 이 파일을 지우면 모든 기기에서 알림을 다시 켜야 하니 `data/` 폴더째 백업하세요.
 
+## 4. 게임 추가·수정하기 (앱 업데이트 필요 없음)
+
+맨 오른쪽 **게임** 탭은 서버에 있는 HTML 게임을 보여줍니다. 안드로이드 앱과 아이폰 웹앱 모두 서버에서 바로 불러오기 때문에,
+**서버 PC에서 파일만 고치면 가족 모두에게 바로 반영**됩니다. 앱을 다시 빌드하거나 서버를 재시작할 필요가 없습니다.
+
+```
+server/web/games/
+  games.json            ← 게임 목록
+  family-games.js       ← 점수 저장·가족 순위 도우미
+  memory/index.html     ← 예시: 짝 맞추기
+  mole/index.html       ← 예시: 두더지 잡기
+```
+
+새 게임 넣는 법:
+
+1. `server/web/games/` 안에 영문 폴더를 만들고(예: `quiz`) 그 안에 `index.html`을 넣습니다. 그림·소리 파일도 같은 폴더에 두면 됩니다.
+2. `games.json`에 한 줄을 추가합니다.
+   ```json
+   { "id": "quiz", "title": "가족 퀴즈", "emoji": "❓", "description": "우리 가족 얼마나 알까?", "scoreOrder": "high", "scoreUnit": "점" }
+   ```
+   - `id`는 폴더 이름과 같아야 합니다 (영문 소문자·숫자·`-`·`_`).
+   - `scoreOrder`: 점수가 높을수록 1등이면 `"high"`, 낮을수록(횟수·시간) 1등이면 `"low"`.
+3. 앱에서 게임 탭을 새로고침하면 바로 나타납니다.
+
+게임에서 가족 순위를 쓰려면 `index.html`에 도우미를 불러오세요:
+
+```html
+<script src="/games/family-games.js"></script>
+<script>
+  // 게임이 끝났을 때
+  const result = await FamilyGames.submitScore(점수);          // 저장하고 순위 받기 (result.record: 내 최고 기록인지)
+  FamilyGames.renderLeaderboard(document.getElementById('rank'), result);  // 순위표 그리기
+</script>
+```
+
+`FamilyGames.me()`로 지금 하는 가족의 이름도 알 수 있습니다. `games.json` 문법이 틀리면 게임 목록이 비어 보이니, 고친 뒤 게임 탭이 비면 쉼표·따옴표를 확인하세요.
+
 ## 알림에 대해
 
 이 앱은 구글 Firebase 없이 직접 만든 서버를 쓰기 때문에, 앱이 서버와 연결을 유지하는 방식으로 알림을 받습니다.
@@ -108,7 +145,7 @@ FAMILY_CODE=우리집코드 npm start     # 또는 환경 변수로 지정
 
 ```bash
 cd server && npm test             # 서버 테스트
-cd android && ./gradlew assembleDebug testDebugUnitTest   # APK 빌드 + 앱 테스트
+cd android && ./gradlew assembleDebug testDebugUnitTest   # APK 빌드 + 앱 테스트 (화면 테스트는 실제 서버를 띄우므로 server에서 npm install 먼저)
 # 웹앱(server/web)은 빌드가 필요 없습니다. 파일을 고치고 새로고침하면 됩니다.
 cd server && node scripts/capture-fixtures.mjs ../android/app/src/test/resources/fixtures   # 서버 API가 바뀌면 앱 테스트용 응답 갱신
 ```

@@ -1,5 +1,5 @@
 // Shared building blocks: icons, avatar, sheets, dialogs, media viewer, long-press, time formatting.
-import { html, useEffect, useRef, useState } from '../vendor/preact-htm.js';
+import { html, useEffect, useLayoutEffect, useRef, useState } from '../vendor/preact-htm.js';
 import { store } from './api.js';
 
 export { html };
@@ -34,6 +34,8 @@ const PATHS = {
   check: '<path d="M20 6L9 17l-5-5"/>',
   share: '<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/>',
   cake: '<path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1M2 21h20M7 8v3M12 8v3M17 8v3M7 4h.01M12 4h.01M17 4h.01"/>',
+  game: '<rect x="2" y="6" width="20" height="12" rx="6"/><path d="M7 12h4M9 10v4"/><circle cx="15.5" cy="11" r=".6"/><circle cx="17.5" cy="13" r=".6"/>',
+  refresh: '<path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/>',
   users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
 };
 
@@ -82,7 +84,37 @@ export function TopBar({ title, small, onBack, children }) {
   </header>`;
 }
 
+// ---- Back button closes pop-ups ---------------------------------------------------------------
+// Each open pop-up adds a history entry, so the phone's back button (or swipe) closes the pop-up
+// instead of leaving the screen. Closing it any other way removes that entry again.
+
+let overlayDepth = 0;
+
+export function useBackToClose(onClose) {
+  const latest = useRef(onClose);
+  latest.current = onClose;
+  // Layout effect: the entry exists as soon as the pop-up is on screen.
+  useLayoutEffect(() => {
+    const depth = ++overlayDepth;
+    let closedByBack = false;
+    history.pushState({ overlay: depth }, '');
+    const onPop = (e) => {
+      if ((e.state?.overlay ?? 0) < depth && !closedByBack) {
+        closedByBack = true;
+        latest.current?.();
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      overlayDepth = depth - 1;
+      if (!closedByBack && history.state?.overlay === depth) history.back();
+    };
+  }, []);
+}
+
 export function Sheet({ title, onClose, children }) {
+  useBackToClose(onClose);
   return html`<div class="backdrop" onClick=${(e) => e.target === e.currentTarget && onClose()}>
     <div class="sheet">
       <div class="grabber"></div>
@@ -93,6 +125,7 @@ export function Sheet({ title, onClose, children }) {
 }
 
 export function Dialog({ title, onClose, children, actions }) {
+  useBackToClose(onClose);
   return html`<div class="backdrop middle" onClick=${(e) => e.target === e.currentTarget && onClose?.()}>
     <div class="dialog" role="dialog">
       ${title && html`<h2>${title}</h2>`}
@@ -119,6 +152,7 @@ export function Toggle({ checked, onChange }) {
 
 /** Full-screen, swipeable photo/video viewer. items: [{ url, kind, posterUrl }] */
 export function MediaViewer({ items, start = 0, onClose }) {
+  useBackToClose(onClose);
   const track = useRef(null);
   const [index, setIndex] = useState(start);
   useEffect(() => {

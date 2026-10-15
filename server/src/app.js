@@ -9,6 +9,7 @@ import { openDatabase } from './db.js';
 import { participants, registerChatRoutes } from './chat.js';
 import { registerFamilyRoutes } from './family.js';
 import { registerFeedRoutes } from './feed.js';
+import { registerGameRoutes } from './games.js';
 import { createPush } from './push.js';
 
 export { GROUP_ID } from './chat.js';
@@ -64,7 +65,14 @@ function toUser(row) {
   };
 }
 
-export function createServer({ familyCode, dataDir, now = () => new Date(), reminderHour = 9, pushSend }) {
+export function createServer({
+  familyCode,
+  dataDir,
+  now = () => new Date(),
+  reminderHour = 9,
+  pushSend,
+  gamesDir = path.join(WEB_DIR, 'games'),
+}) {
   if (!familyCode) throw new Error('familyCode is required');
   const uploadDir = path.join(dataDir, 'uploads');
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -262,6 +270,7 @@ export function createServer({ familyCode, dataDir, now = () => new Date(), remi
   const notify = (userIds, payload) => push.notify(userIds, payload).catch((err) => console.warn(err));
   registerChatRoutes(app, { db, auth, broadcast, saveFile, removeFiles, imageTypes: IMAGE_TYPES, notify });
   registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes: Object.keys(MEDIA_TYPES), now, notify });
+  registerGameRoutes(app, { db, auth, gamesDir });
   const family = registerFamilyRoutes(app, {
     db,
     auth,
@@ -277,7 +286,10 @@ export function createServer({ familyCode, dataDir, now = () => new Date(), remi
   app.use(
     express.static(WEB_DIR, {
       setHeaders: (res, file) => {
-        if (/(index\.html|sw\.js|\.webmanifest)$/.test(file)) res.set('Cache-Control', 'no-cache');
+        // Games are edited in place on the server PC, so they're never cached either.
+        if (/(index\.html|sw\.js|\.webmanifest)$/.test(file) || file.includes(`${path.sep}games${path.sep}`)) {
+          res.set('Cache-Control', 'no-cache');
+        }
       },
     }),
   );

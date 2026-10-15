@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from '../vendor/preact-htm.js';
 import { api, compressImage, isVideoFile, MAX_VIDEO_BYTES, onLive, videoPoster } from './api.js';
-import { ago, Avatar, avatarUrlOf, Confirm, go, html, Icon, MediaViewer, Sheet, Spinner, TopBar, useStore } from './ui.js';
+import { ago, Avatar, avatarUrlOf, Confirm, go, html, Icon, MediaViewer, Sheet, Spinner, TopBar, useBackToClose, useStore } from './ui.js';
 
 const MAX_MEDIA = 10;
 const NEW = 'new';
@@ -285,10 +285,11 @@ function Comments({ post, me, onClose }) {
 // ---- New post / edit ------------------------------------------------------------------------
 
 function PostEditor({ editing, onClose, onSaved }) {
+  const [busy, setBusy] = useState(false);
+  useBackToClose(() => !busy && onClose());
   const [text, setText] = useState(editing?.text ?? '');
   // Existing media stays as is; picked files are shrunk and uploaded on save.
   const [drafts, setDrafts] = useState(() => (editing?.media ?? []).map((m) => ({ key: m.name, existing: m })));
-  const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState(null);
   const input = useRef(null);

@@ -3,6 +3,7 @@ import { render, useEffect, useState } from '../vendor/preact-htm.js';
 import { api, connect, disconnect, onLive, onLoggedOut, store, syncPush } from './api.js';
 import { ChatList, ChatRoom } from './chat.js';
 import { CalendarScreen } from './calendar.js';
+import { GamePlayer, GamesScreen } from './games.js';
 import { ListsScreen } from './lists.js';
 import { LoginScreen } from './login.js';
 import { ProfileScreen } from './profile.js';
@@ -13,8 +14,10 @@ import { go, html, Icon, preview, Spinner, toast, Toasts, useStore } from './ui.
 function fitViewport() {
   const h = window.visualViewport?.height ?? window.innerHeight;
   document.documentElement.style.setProperty('--app-height', `${h}px`);
+  document.documentElement.style.setProperty('--vv-top', `${window.visualViewport?.offsetTop ?? 0}px`);
 }
 window.visualViewport?.addEventListener('resize', fitViewport);
+window.visualViewport?.addEventListener('scroll', fitViewport);
 window.addEventListener('resize', fitViewport);
 fitViewport();
 
@@ -46,6 +49,7 @@ const TABS = [
   { route: 'story', label: '스토리', icon: 'grid' },
   { route: 'calendar', label: '일정', icon: 'calendar' },
   { route: 'lists', label: '목록', icon: 'list' },
+  { route: 'games', label: '게임', icon: 'game' },
 ];
 
 function TabBar({ current, unread }) {
@@ -145,6 +149,11 @@ function App() {
   switch (route.name) {
     case 'chat':
       return html`<${ChatRoom} key=${route.id} id=${route.id} title=${titleOf(route.id)} me=${me} onBack=${() => go('/chats')} /><${Toasts} />`;
+    case 'game':
+      return html`<${GamePlayer} key=${route.id} id=${route.id} onBack=${() => go('/games')} /><${Toasts} />`;
+    case 'games':
+      screen = html`<${GamesScreen} />`;
+      break;
     case 'profile':
       return html`<${ProfileScreen} me=${me} onBack=${() => go('/chats')} /><${Toasts} />`;
     case 'story':

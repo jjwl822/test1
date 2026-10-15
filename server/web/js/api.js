@@ -87,6 +87,8 @@ export const api = {
   deleteItem: (id) => del(`/api/lists/items/${id}`),
   clearDone: (list) => post(`/api/lists/${list}/clear-done`),
 
+  games: () => get('/api/games'),
+
   pushKey: () => get('/api/push/key'),
   pushSubscribe: (sub) => post('/api/push/subscribe', sub),
 };
