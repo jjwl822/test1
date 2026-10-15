@@ -10,6 +10,7 @@ import com.family.messenger.data.Comment
 import com.family.messenger.data.ImageCompressor
 import com.family.messenger.data.MessageBus
 import com.family.messenger.data.Post
+import com.family.messenger.data.VideoCompressor
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +25,8 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
         val loading: Boolean = true,
         val hasOlder: Boolean = false,
         val posting: Boolean = false,
+        /** What the upload is doing right now, e.g. "동영상 압축 중 2/5 · 40%". */
+        val progress: String? = null,
         val error: String? = null,
         /** Post whose comments sheet is open, and its comments. */
         val commentsFor: Long? = null,
@@ -59,17 +62,43 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Creates a post. Calls [onDone] once it is published so the composer can close. */
-    fun create(text: String, photo: Uri?, onDone: () -> Unit) = viewModelScope.launch {
+    /**
+     * Shrinks each photo/video, uploads them one at a time (to keep memory low), then creates the
+     * post. Calls [onDone] once it is published so the composer can close.
+     */
+    fun create(text: String, items: List<Uri>, onDone: () -> Unit) = viewModelScope.launch {
         _state.value = _state.value.copy(posting = true, error = null)
+        fun status(text: String) {
+            _state.value = _state.value.copy(progress = text)
+        }
         try {
-            val jpeg = photo?.let { ImageCompressor.compress(app, it) }
-            upsert(app.api.createPost(text, jpeg))
+            val uploaded = items.mapIndexed { index, uri ->
+                val step = "${index + 1}/${items.size}"
+                if (app.contentResolver.getType(uri)?.startsWith("video/") == true) {
+                    status("동영상 줄이는 중 $step")
+                    val video = VideoCompressor.compress(app, uri) { percent -> status("동영상 줄이는 중 $step · $percent%") }
+                    try {
+                        if (video.video.length() > MAX_VIDEO_BYTES) throw ApiException("동영상이 너무 깁니다. 더 짧게 잘라서 올려주세요.")
+                        status("업로드 중 $step")
+                        val poster = app.api.uploadPhoto(video.poster)
+                        app.api.uploadVideo(video.video).name to poster.name
+                    } finally {
+                        video.video.delete()
+                    }
+                } else {
+                    status("사진 줄이는 중 $step")
+                    val jpeg = ImageCompressor.compress(app, uri)
+                    status("업로드 중 $step")
+                    app.api.uploadPhoto(jpeg).name to null
+                }
+            }
+            status("올리는 중")
+            upsert(app.api.createPost(text, uploaded))
             onDone()
         } catch (e: Exception) {
             _state.value = _state.value.copy(error = e.message ?: "올리지 못했습니다.")
         } finally {
-            _state.value = _state.value.copy(posting = false)
+            _state.value = _state.value.copy(posting = false, progress = null)
         }
     }
 
@@ -148,5 +177,6 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val PAGE = 20
+        const val MAX_VIDEO_BYTES = 100L * 1024 * 1024
     }
 }

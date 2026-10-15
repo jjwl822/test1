@@ -24,6 +24,17 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.ui.platform.LocalContext
+import com.family.messenger.data.PostMedia
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -84,6 +95,7 @@ import com.family.messenger.data.User
 import com.family.messenger.service.Notifications
 
 private val HeartRed = Color(0xFFE53950)
+private const val MAX_MEDIA = 10
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,7 +103,7 @@ fun FeedScreen(app: FamilyApp, me: User) {
     val viewModel: FeedViewModel = viewModel { FeedViewModel(app) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     var composing by rememberSaveable { mutableStateOf(false) }
-    var viewing by remember { mutableStateOf<String?>(null) }
+    var viewing by remember { mutableStateOf<Pair<List<PostMedia>, Int>?>(null) }
     var confirmDelete by remember { mutableStateOf<Post?>(null) }
 
     DisposableEffect(Unit) {
@@ -146,11 +158,11 @@ fun FeedScreen(app: FamilyApp, me: User) {
                     PostCard(
                         post = post,
                         mine = post.authorId == me.id,
-                        imageUrl = post.imageUrl?.let(app.api::url),
+                        app = app,
                         onReact = { kind -> viewModel.react(post, kind) },
                         onComments = { viewModel.openComments(post) },
                         onDelete = { confirmDelete = post },
-                        onImageClick = { viewing = it },
+                        onMediaClick = { index -> viewing = post.media to index },
                     )
                 }
                 if (state.hasOlder) {
@@ -168,6 +180,7 @@ fun FeedScreen(app: FamilyApp, me: User) {
     if (composing) {
         ComposeDialog(
             posting = state.posting,
+            progress = state.progress,
             error = state.error,
             onDismiss = { composing = false },
             onSubmit = { text, photo -> viewModel.create(text, photo) { composing = false } },
@@ -200,12 +213,8 @@ fun FeedScreen(app: FamilyApp, me: User) {
         )
     }
 
-    viewing?.let { url ->
-        Dialog(onDismissRequest = { viewing = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Box(Modifier.fillMaxSize().background(Color.Black).clickable { viewing = null }) {
-                AsyncImage(model = url, contentDescription = "사진", contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
-            }
-        }
+    viewing?.let { (media, index) ->
+        MediaViewer(app, media, index, onDismiss = { viewing = null })
     }
 }
 
@@ -213,11 +222,11 @@ fun FeedScreen(app: FamilyApp, me: User) {
 private fun PostCard(
     post: Post,
     mine: Boolean,
-    imageUrl: String?,
+    app: FamilyApp,
     onReact: (String) -> Unit,
     onComments: () -> Unit,
     onDelete: () -> Unit,
-    onImageClick: (String) -> Unit,
+    onMediaClick: (Int) -> Unit,
 ) {
     Card(Modifier.fillMaxWidth()) {
         Row(
@@ -248,18 +257,7 @@ private fun PostCard(
             }
         }
 
-        if (imageUrl != null) {
-            AsyncImage(
-                model = imageUrl,
-                contentDescription = "스토리 사진",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .clickable { onImageClick(imageUrl) },
-            )
-        }
+        if (post.media.isNotEmpty()) MediaCarousel(app, post.media, onMediaClick)
 
         Row(
             Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
@@ -316,19 +314,82 @@ private fun ReactionButton(icon: ImageVector, tint: Color?, count: Int, label: S
     }
 }
 
+/** Swipeable photos/videos of one post, like Instagram: page counter on top, dots below. */
+@Composable
+private fun MediaCarousel(app: FamilyApp, media: List<PostMedia>, onClick: (Int) -> Unit) {
+    val pager = rememberPagerState { media.size }
+    Box(Modifier.fillMaxWidth().aspectRatio(1f).background(MaterialTheme.colorScheme.surfaceVariant)) {
+        HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
+            val item = media[page]
+            Box(Modifier.fillMaxSize().clickable { onClick(page) }) {
+                AsyncImage(
+                    model = app.api.url(item.posterUrl ?: item.url),
+                    contentDescription = if (item.isVideo) "동영상" else "사진",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                if (item.isVideo) PlayBadge(Modifier.align(Alignment.Center), size = 64)
+            }
+        }
+        if (media.size > 1) {
+            Text(
+                "${pager.currentPage + 1}/${media.size}",
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(10.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            )
+            Row(
+                Modifier.align(Alignment.BottomCenter).padding(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                repeat(media.size) { i ->
+                    Box(
+                        Modifier
+                            .size(6.dp)
+                            .background(Color.White.copy(alpha = if (i == pager.currentPage) 1f else 0.5f), CircleShape),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayBadge(modifier: Modifier, size: Int) {
+    Icon(
+        Icons.Filled.PlayCircle,
+        contentDescription = null,
+        tint = Color.White.copy(alpha = 0.9f),
+        modifier = modifier.size(size.dp),
+    )
+}
+
+private val uriListSaver = listSaver<MutableState<List<Uri>>, String>(
+    save = { state -> state.value.map(Uri::toString) },
+    restore = { saved -> mutableStateOf(saved.map(Uri::parse)) },
+)
+
 @Composable
 private fun ComposeDialog(
     posting: Boolean,
+    progress: String?,
     error: String?,
     onDismiss: () -> Unit,
-    onSubmit: (String, Uri?) -> Unit,
+    onSubmit: (String, List<Uri>) -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
-    var photo by rememberSaveable { mutableStateOf<Uri?>(null) }
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) photo = uri
+    var picked by rememberSaveable(saver = uriListSaver) { mutableStateOf(emptyList()) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MAX_MEDIA)) { uris ->
+        val all = (picked + uris).distinct()
+        notice = if (all.size > MAX_MEDIA) "사진과 동영상은 ${MAX_MEDIA}개까지 올릴 수 있어요." else null
+        picked = all.take(MAX_MEDIA)
     }
-    val pickPhoto = { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+    val openPicker = { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }
 
     Dialog(
         onDismissRequest = { if (!posting) onDismiss() },
@@ -346,45 +407,81 @@ private fun ComposeDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onDismiss, enabled = !posting) { Icon(Icons.Filled.Close, contentDescription = "닫기") }
                 Text("새 스토리", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                Button(onClick = { onSubmit(text.trim(), photo) }, enabled = !posting && (text.isNotBlank() || photo != null)) {
+                Button(onClick = { onSubmit(text.trim(), picked) }, enabled = !posting && (text.isNotBlank() || picked.isNotEmpty())) {
                     if (posting) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("올리기")
                 }
             }
 
-            val current = photo
-            if (current != null) {
-                Box {
-                    AsyncImage(
-                        model = current,
-                        contentDescription = "선택한 사진",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
-                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
-                            .clickable(onClick = pickPhoto),
-                    )
-                    IconButton(onClick = { photo = null }, modifier = Modifier.align(Alignment.TopEnd)) {
-                        Icon(Icons.Filled.Close, contentDescription = "사진 빼기", tint = Color.White)
+            progress?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            }
+
+            Text(
+                "사진·동영상 ${picked.size}/$MAX_MEDIA · 올릴 때 자동으로 크기를 줄여요",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                itemsIndexed(picked, key = { _, uri -> uri.toString() }) { index, uri ->
+                    Box(Modifier.size(104.dp)) {
+                        AsyncImage(
+                            model = uri,
+                            contentDescription = "선택한 항목 ${index + 1}",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)),
+                        )
+                        if (isVideo(uri)) PlayBadge(Modifier.align(Alignment.Center), size = 36)
+                        if (!posting) {
+                            IconButton(
+                                onClick = { picked = picked - uri },
+                                modifier = Modifier.align(Alignment.TopEnd).size(32.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Cancel,
+                                    contentDescription = "빼기",
+                                    tint = Color.White,
+                                    modifier = Modifier.background(Color.Black.copy(alpha = 0.4f), CircleShape),
+                                )
+                            }
+                        }
                     }
                 }
-            } else {
-                OutlinedButton(onClick = pickPhoto, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp)) {
-                    Icon(Icons.Filled.AddPhotoAlternate, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("사진 선택")
+                if (picked.size < MAX_MEDIA && !posting) {
+                    item {
+                        OutlinedButton(
+                            onClick = openPicker,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(0.dp),
+                            modifier = Modifier.size(104.dp),
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Filled.AddPhotoAlternate, contentDescription = null)
+                                Text("추가", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
                 }
             }
+            notice?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
 
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
                 placeholder = { Text("가족에게 이야기를 들려주세요") },
+                enabled = !posting,
                 modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(min = 120.dp),
             )
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }
+}
+
+@Composable
+private fun isVideo(uri: Uri): Boolean {
+    val context = LocalContext.current
+    return remember(uri) { context.contentResolver.getType(uri)?.startsWith("video/") == true }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

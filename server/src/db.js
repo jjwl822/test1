@@ -56,6 +56,24 @@ export function openDatabase(file) {
       kind    TEXT NOT NULL CHECK (kind IN ('heart', 'like', 'dislike')),
       PRIMARY KEY (post_id, user_id, kind)
     );
+
+    -- Photos and videos uploaded for stories. A row with post_id NULL is an upload that has
+    -- not been attached to a post yet. position is NULL for video poster frames.
+    CREATE TABLE IF NOT EXISTS media (
+      name        TEXT PRIMARY KEY,
+      uploader_id INTEGER NOT NULL REFERENCES users(id),
+      kind        TEXT NOT NULL CHECK (kind IN ('image', 'video')),
+      post_id     INTEGER REFERENCES posts(id) ON DELETE CASCADE,
+      position    INTEGER,
+      poster      TEXT,
+      created_at  INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_media_post ON media(post_id, position);
+
+    -- Stories from before multi-photo support kept their single photo in posts.image.
+    INSERT OR IGNORE INTO media (name, uploader_id, kind, post_id, position, created_at)
+      SELECT image, author_id, 'image', id, 0, created_at FROM posts WHERE image IS NOT NULL;
   `);
   return db;
 }

@@ -15,7 +15,8 @@ const IMAGE_TYPES = {
   'image/webp': 'webp',
   'image/gif': 'gif',
 };
-const IMAGE_NAME = /^[a-f0-9]{32}\.(jpg|png|webp|gif)$/;
+const MEDIA_TYPES = { ...IMAGE_TYPES, 'video/mp4': 'mp4' };
+const MEDIA_NAME = /^[a-f0-9]{32}\.(jpg|png|webp|gif|mp4)$/;
 const MAX_TEXT = 4000;
 
 function hashPassword(password) {
@@ -85,11 +86,7 @@ export function createServer({ familyCode, dataDir }) {
 
   const app = express();
   app.disable('x-powered-by');
-  const smallJson = express.json({ limit: '64kb' });
-  const postJson = express.json({ limit: '20mb' }); // story posts carry a base64 photo
-  app.use((req, res, next) =>
-    (req.method === 'POST' && req.path === '/api/posts' ? postJson : smallJson)(req, res, next),
-  );
+  app.use(express.json({ limit: '64kb' }));
 
   /** userId -> Set<WebSocket> */
   const sockets = new Map();
@@ -144,9 +141,9 @@ export function createServer({ familyCode, dataDir }) {
     broadcast([...sockets.keys()], payload);
   }
 
-  /** Writes an uploaded image and returns its file name, or null for unsupported types. */
-  function saveImage(buffer, contentType) {
-    const ext = IMAGE_TYPES[contentType?.split(';')[0].trim()];
+  /** Writes an uploaded photo or video and returns its file name, or null for unsupported types. */
+  function saveFile(buffer, contentType, types = MEDIA_TYPES) {
+    const ext = types[contentType?.split(';')[0].trim()];
     if (!ext) return null;
     const name = `${crypto.randomBytes(16).toString('hex')}.${ext}`;
     fs.writeFileSync(path.join(uploadDir, name), buffer);
@@ -252,18 +249,22 @@ export function createServer({ familyCode, dataDir }) {
     express.raw({ type: Object.keys(IMAGE_TYPES), limit: '15mb' }),
     (req, res) => {
       const name =
-        Buffer.isBuffer(req.body) && req.body.length > 0 ? saveImage(req.body, req.get('content-type')) : null;
+        Buffer.isBuffer(req.body) && req.body.length > 0 ? saveFile(req.body, req.get('content-type'), IMAGE_TYPES) : null;
       if (!name) return res.status(400).json({ error: '지원하지 않는 이미지 형식입니다.' });
       res.status(201).json(saveMessage(req.params.id, req.user.id, 'image', null, name, req.participants));
     },
   );
 
-  app.get('/api/images/:name', auth, (req, res) => {
+  // Serves chat photos and story photos/videos. sendFile supports Range requests for video seeking.
+  app.get(['/api/images/:name', '/api/media/:name'], auth, (req, res) => {
     const { name } = req.params;
-    if (!IMAGE_NAME.test(name)) return res.status(404).end();
-    // Story photos are visible to the whole family; chat photos only to that conversation.
-    const isStory = db.prepare('SELECT 1 FROM posts WHERE image = ?').get(name);
-    if (!isStory) {
+    if (!MEDIA_NAME.test(name)) return res.status(404).end();
+    // Story media is visible to the whole family once posted (before that, only to the uploader);
+    // chat photos only to that conversation.
+    const story = db.prepare('SELECT uploader_id, post_id FROM media WHERE name = ?').get(name);
+    if (story) {
+      if (story.post_id === null && story.uploader_id !== req.user.id) return res.status(404).end();
+    } else {
       const row = db.prepare('SELECT conversation_id FROM messages WHERE image = ?').get(name);
       const ids = row && participants(db, row.conversation_id);
       if (!ids || !ids.includes(req.user.id)) return res.status(404).end();
@@ -272,7 +273,7 @@ export function createServer({ familyCode, dataDir }) {
     res.sendFile(path.join(uploadDir, name));
   });
 
-  registerFeedRoutes(app, { db, auth, broadcastAll, saveImage, uploadDir });
+  registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes: Object.keys(MEDIA_TYPES) });
 
   app.use((err, _req, res, _next) => {
     if (err.type === 'entity.too.large') return res.status(413).json({ error: '파일이 너무 큽니다.' });
@@ -321,6 +322,7 @@ export function createServer({ familyCode, dataDir }) {
 
   server.on('close', () => {
     clearInterval(heartbeat);
+    app.locals.stopCleanup?.();
     for (const ws of wss.clients) ws.terminate();
     db.close();
   });

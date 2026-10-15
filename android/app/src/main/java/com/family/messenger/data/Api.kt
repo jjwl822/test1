@@ -1,6 +1,5 @@
 package com.family.messenger.data
 
-import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -9,13 +8,16 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.putJsonArray
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -95,13 +97,24 @@ class Api(private val session: Session) {
 
     suspend fun post(id: Long): Post = call(Request.Builder().url(url("/api/posts/$id")).build())
 
-    suspend fun createPost(text: String, jpeg: ByteArray?): Post {
+    /** Uploads one story photo (JPEG bytes) or video (MP4 file); attach it with [createPost]. */
+    suspend fun uploadPhoto(jpeg: ByteArray): Uploaded = upload(jpeg.toRequestBody("image/jpeg".toMediaType()))
+
+    suspend fun uploadVideo(mp4: File): Uploaded = upload(mp4.asRequestBody("video/mp4".toMediaType()))
+
+    private suspend fun upload(body: RequestBody): Uploaded =
+        call(Request.Builder().url(url("/api/media")).post(body).build())
+
+    /** [media] holds upload names, each with the poster frame's upload name for videos. */
+    suspend fun createPost(text: String, media: List<Pair<String, String?>>): Post {
         val body = buildJsonObject {
             put("text", text)
-            if (jpeg != null) {
-                putJsonObject("image") {
-                    put("type", "image/jpeg")
-                    put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP))
+            putJsonArray("media") {
+                for ((name, poster) in media) {
+                    addJsonObject {
+                        put("name", name)
+                        if (poster != null) put("poster", poster)
+                    }
                 }
             }
         }

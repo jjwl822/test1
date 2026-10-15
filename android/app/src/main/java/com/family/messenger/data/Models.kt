@@ -53,11 +53,26 @@ data class Post(
     val authorId: Long,
     val authorName: String,
     val text: String,
-    val imageUrl: String? = null,
+    val media: List<PostMedia> = emptyList(),
     val createdAt: Long,
     val commentCount: Int,
     val reactions: Reactions,
     val myReactions: List<String>,
+)
+
+@Serializable
+data class PostMedia(
+    val url: String,
+    val kind: String,
+    val posterUrl: String? = null,
+) {
+    val isVideo: Boolean get() = kind == "video"
+}
+
+@Serializable
+data class Uploaded(
+    val name: String,
+    val kind: String,
 )
 
 @Serializable

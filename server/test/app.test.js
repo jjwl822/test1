@@ -102,16 +102,42 @@ test('story feed', async () => {
   ws.on('message', (d) => events.push(JSON.parse(d)));
   await new Promise((r) => ws.on('open', r));
 
+  const upload = async (token, bytes, type) =>
+    (await call('POST', '/api/media', { token, body: bytes, type })).data.name;
+  const photo = Buffer.from(png, 'base64');
+  const mp4 = Buffer.from('000000186674797069736f6d', 'hex');
+  const p1 = await upload(mom.token, photo, 'image/png');
+  const video = await upload(mom.token, mp4, 'video/mp4');
+  const poster = await upload(mom.token, photo, 'image/png');
+  assert.match(video, /\.mp4$/);
+  assert.equal((await call('POST', '/api/media', { token: mom.token, body: 'x', type: 'text/plain' })).status, 400);
+  // Not yet posted: only the uploader can see it
+  assert.equal((await call('GET', `/api/media/${p1}`, { token: dad.token })).status, 404);
+  // Someone else's upload cannot be attached
+  assert.equal((await call('POST', '/api/posts', { token: dad.token, json: { media: [{ name: p1 }] } })).status, 400);
+  // Max 10 items
+  const eleven = Array.from({ length: 11 }, () => ({ name: p1 }));
+  assert.equal((await call('POST', '/api/posts', { token: mom.token, json: { media: eleven } })).status, 400);
+
   const created = await call('POST', '/api/posts', {
     token: mom.token,
-    json: { text: '오늘 소풍!', image: { type: 'image/png', data: png } },
+    json: { text: '오늘 소풍!', media: [{ name: p1 }, { name: video, poster }] },
   });
   assert.equal(created.status, 201);
   const post = created.data;
   assert.equal(post.authorName, '엄마');
   assert.deepEqual(post.reactions, { heart: 0, like: 0, dislike: 0 });
-  // Story photos are visible to every family member
-  assert.equal((await call('GET', post.imageUrl, { token: dad.token })).status, 200);
+  assert.deepEqual(post.media, [
+    { url: `/api/media/${p1}`, kind: 'image', posterUrl: null },
+    { url: `/api/media/${video}`, kind: 'video', posterUrl: `/api/media/${poster}` },
+  ]);
+  // Can't reuse uploads already attached to a post
+  assert.equal((await call('POST', '/api/posts', { token: mom.token, json: { media: [{ name: p1 }] } })).status, 400);
+  // Story media is visible to every family member, and video supports range requests
+  assert.equal((await call('GET', post.media[0].url, { token: dad.token })).status, 200);
+  const ranged = await fetch(base + post.media[1].url, { headers: { authorization: `Bearer ${dad.token}`, range: 'bytes=0-3' } });
+  assert.equal(ranged.status, 206);
+  assert.equal((await ranged.arrayBuffer()).byteLength, 4);
   assert.equal((await call('POST', '/api/posts', { token: dad.token, json: { text: '글만 올리기' } })).status, 201);
 
   const feed = (await call('GET', '/api/posts', { token: dad.token })).data;
@@ -144,7 +170,10 @@ test('story feed', async () => {
   assert.equal((await call('DELETE', `/api/posts/${post.id}`, { token: dad.token })).status, 403);
   assert.equal((await call('DELETE', `/api/posts/${post.id}`, { token: mom.token })).status, 200);
   assert.equal((await call('GET', `/api/posts/${post.id}`, { token: mom.token })).status, 404);
-  assert.equal((await call('GET', post.imageUrl, { token: dad.token })).status, 404);
+  for (const m of [p1, video, poster]) {
+    assert.equal((await call('GET', `/api/media/${m}`, { token: mom.token })).status, 404);
+    assert.equal(fs.existsSync(path.join(dataDir, 'uploads', m)), false);
+  }
 
   await new Promise((r) => setTimeout(r, 50));
   ws.close();

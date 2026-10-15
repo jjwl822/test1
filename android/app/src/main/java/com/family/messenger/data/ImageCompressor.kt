@@ -18,8 +18,20 @@ object ImageCompressor {
 
     suspend fun compress(context: Context, uri: Uri): ByteArray = withContext(Dispatchers.IO) {
         val bitmap = decode(context, uri) ?: throw ApiException("사진을 열 수 없습니다.")
-        ByteArrayOutputStream().use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+        toJpeg(bitmap)
+    }
+
+    /** Scales [bitmap] down to [maxSide] if needed, encodes it as JPEG and recycles it. */
+    fun toJpeg(bitmap: Bitmap, maxSide: Int = MAX_SIDE, quality: Int = 85): ByteArray {
+        val scale = maxSide.toFloat() / max(bitmap.width, bitmap.height)
+        val scaled = if (scale < 1f) {
+            Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).roundToInt(), (bitmap.height * scale).roundToInt(), true)
+        } else {
+            bitmap
+        }
+        return ByteArrayOutputStream().use { out ->
+            scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
+            if (scaled !== bitmap) scaled.recycle()
             bitmap.recycle()
             out.toByteArray()
         }

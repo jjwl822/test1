@@ -1,15 +1,25 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import express from 'express';
 
 const MAX_POST_TEXT = 2000;
 const MAX_COMMENT_TEXT = 500;
+export const MAX_MEDIA = 10;
+const ORPHAN_AGE = 24 * 60 * 60 * 1000;
 export const REACTIONS = ['heart', 'like', 'dislike'];
 
 /**
  * The family story feed: one shared board everyone sees, with photo + text posts,
  * comments and heart / like / dislike reactions.
  */
-export function registerFeedRoutes(app, { db, auth, broadcastAll, saveImage, uploadDir }) {
+export function registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes }) {
+  const mediaUrl = (name) => (name ? `/api/media/${name}` : null);
+  const postMedia = db.prepare(
+    'SELECT name, kind, poster FROM media WHERE post_id = ? AND position IS NOT NULL ORDER BY position',
+  );
+  const removeFiles = (names) => {
+    for (const name of names) fs.rmSync(path.join(uploadDir, name), { force: true });
+  };
   const POST_SELECT = `
     SELECT p.*, u.display_name AS author_name,
       (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) AS comment_count
@@ -26,7 +36,7 @@ export function registerFeedRoutes(app, { db, auth, broadcastAll, saveImage, upl
       authorId: row.author_id,
       authorName: row.author_name,
       text: row.text,
-      imageUrl: row.image ? `/api/images/${row.image}` : null,
+      media: postMedia.all(row.id).map((m) => ({ url: mediaUrl(m.name), kind: m.kind, posterUrl: mediaUrl(m.poster) })),
       createdAt: row.created_at,
       commentCount: row.comment_count,
       reactions: counts,
@@ -69,31 +79,74 @@ export function registerFeedRoutes(app, { db, auth, broadcastAll, saveImage, upl
 
   app.get('/api/posts/:id', auth, requirePost, (req, res) => res.json(req.post));
 
-  // JSON body: { text, image?: { type: "image/jpeg", data: "<base64>" } }
+  // Step 1: upload each photo or video (and each video's poster frame) as a raw body.
+  app.post('/api/media', auth, express.raw({ type: mediaTypes, limit: '100mb' }), (req, res) => {
+    const contentType = req.get('content-type') ?? '';
+    const name = Buffer.isBuffer(req.body) && req.body.length > 0 ? saveFile(req.body, contentType) : null;
+    if (!name) return res.status(400).json({ error: '지원하지 않는 파일 형식입니다.' });
+    const kind = contentType.startsWith('video/') ? 'video' : 'image';
+    db.prepare('INSERT INTO media (name, uploader_id, kind, created_at) VALUES (?, ?, ?, ?)').run(
+      name,
+      req.user.id,
+      kind,
+      Date.now(),
+    );
+    res.status(201).json({ name, kind });
+  });
+
+  // Step 2: create the post. Body: { text, media: [{ name, poster? }] } using names from step 1.
   app.post('/api/posts', auth, (req, res) => {
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
-    const image = req.body?.image;
+    const items = Array.isArray(req.body?.media) ? req.body.media : [];
     if (text.length > MAX_POST_TEXT) return res.status(400).json({ error: '글이 너무 깁니다.' });
-    if (!text && !image) return res.status(400).json({ error: '사진이나 글을 입력하세요.' });
-    let imageName = null;
-    if (image) {
-      const buffer = typeof image.data === 'string' ? Buffer.from(image.data, 'base64') : null;
-      imageName = buffer?.length ? saveImage(buffer, image.type) : null;
-      if (!imageName) return res.status(400).json({ error: '지원하지 않는 이미지 형식입니다.' });
+    if (!text && items.length === 0) return res.status(400).json({ error: '사진이나 글을 입력하세요.' });
+    if (items.length > MAX_MEDIA) return res.status(400).json({ error: `사진과 동영상은 ${MAX_MEDIA}개까지 올릴 수 있습니다.` });
+
+    const upload = db.prepare('SELECT * FROM media WHERE name = ? AND uploader_id = ? AND post_id IS NULL');
+    const seen = new Set();
+    const usable = (name, kind) => {
+      if (typeof name !== 'string' || seen.has(name)) return false;
+      const row = upload.get(name, req.user.id);
+      if (!row || (kind && row.kind !== kind)) return false;
+      seen.add(name);
+      return row;
+    };
+    const resolved = [];
+    for (const item of items) {
+      const row = usable(item?.name);
+      const poster = item?.poster == null ? null : usable(item.poster, 'image');
+      if (!row || poster === false || (poster && row.kind !== 'video')) {
+        return res.status(400).json({ error: '업로드한 파일을 찾을 수 없습니다. 다시 시도하세요.' });
+      }
+      resolved.push({ name: row.name, poster: poster ? poster.name : null });
     }
-    const { lastInsertRowid } = db
-      .prepare('INSERT INTO posts (author_id, text, image, created_at) VALUES (?, ?, ?, ?)')
-      .run(req.user.id, text, imageName, Date.now());
-    const post = findPost(lastInsertRowid, req.user.id);
+
+    const attach = db.prepare('UPDATE media SET post_id = ?, position = ?, poster = ? WHERE name = ?');
+    db.exec('BEGIN');
+    let postId;
+    try {
+      postId = db
+        .prepare('INSERT INTO posts (author_id, text, created_at) VALUES (?, ?, ?)')
+        .run(req.user.id, text, Date.now()).lastInsertRowid;
+      resolved.forEach((m, i) => {
+        attach.run(postId, i, m.poster, m.name);
+        if (m.poster) attach.run(postId, null, null, m.poster);
+      });
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+    const post = findPost(postId, req.user.id);
     broadcastAll({ type: 'post', postId: post.id, authorId: req.user.id, authorName: req.user.displayName });
     res.status(201).json(post);
   });
 
   app.delete('/api/posts/:id', auth, requirePost, (req, res) => {
     if (req.post.authorId !== req.user.id) return res.status(403).json({ error: '내가 올린 글만 지울 수 있습니다.' });
-    const { image } = db.prepare('SELECT image FROM posts WHERE id = ?').get(req.post.id);
+    const files = db.prepare('SELECT name FROM media WHERE post_id = ?').all(req.post.id).map((r) => r.name);
     db.prepare('DELETE FROM posts WHERE id = ?').run(req.post.id);
-    if (image) fs.rm(path.join(uploadDir, image), { force: true }, () => {});
+    removeFiles(files);
     changed(req.post.id);
     res.json({ ok: true });
   });
@@ -151,4 +204,16 @@ export function registerFeedRoutes(app, { db, auth, broadcastAll, saveImage, upl
     changed(row.post_id);
     res.json({ ok: true });
   });
+
+  // Uploads that were never attached to a post (e.g. the app closed mid-upload) are removed after a day.
+  function cleanup() {
+    const cutoff = Date.now() - ORPHAN_AGE;
+    const stale = db.prepare('SELECT name FROM media WHERE post_id IS NULL AND created_at < ?').all(cutoff);
+    db.prepare('DELETE FROM media WHERE post_id IS NULL AND created_at < ?').run(cutoff);
+    removeFiles(stale.map((r) => r.name));
+  }
+  cleanup();
+  const timer = setInterval(cleanup, 60 * 60 * 1000);
+  timer.unref();
+  app.locals.stopCleanup = () => clearInterval(timer);
 }
