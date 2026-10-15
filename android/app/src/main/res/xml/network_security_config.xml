@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 집 안 네트워크의 http:// 서버에도 접속할 수 있도록 평문 통신을 허용합니다.
+     인터넷에 공개되는 서버는 반드시 https:// 를 사용하세요. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
