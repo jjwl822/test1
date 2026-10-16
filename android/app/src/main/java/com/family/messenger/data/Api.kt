@@ -132,6 +132,10 @@ class Api(private val session: Session) {
     suspend fun updateName(displayName: String): User =
         call(patch(url("/api/me"), buildJsonObject { put("displayName", displayName) }))
 
+    suspend fun updateColor(color: String): User = call(patch(url("/api/me"), buildJsonObject { put("color", color) }))
+
+    suspend fun bubbleColors(): List<String> = call(Request.Builder().url(url("/api/colors")).build())
+
     suspend fun uploadAvatar(jpeg: ByteArray): User =
         call(Request.Builder().url(url("/api/me/avatar")).post(jpeg.toRequestBody("image/jpeg".toMediaType())).build())
 

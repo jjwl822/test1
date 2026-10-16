@@ -178,6 +178,24 @@ test('profile name and photo', async () => {
   await call('PATCH', '/api/me', { token: mom.token, json: { displayName: '엄마' } });
 });
 
+test('bubble colors', async () => {
+  const { mom, dad } = await setup();
+  const colors = (await call('GET', '/api/colors', { token: mom.token })).data;
+  assert.equal(colors.length, 10);
+  // Everyone starts with a different color, by join order.
+  const users = (await call('GET', '/api/users', { token: mom.token })).data;
+  assert.equal(new Set(users.map((u) => u.color)).size, users.length);
+  assert.ok(users.every((u) => colors.includes(u.color)));
+
+  const picked = await call('PATCH', '/api/me', { token: dad.token, json: { color: colors[4] } });
+  assert.equal(picked.data.color, colors[4]);
+  assert.equal(picked.data.displayName, '아빠'); // name untouched
+  assert.equal((await call('PATCH', '/api/me', { token: dad.token, json: { color: '#123456' } })).status, 400);
+  assert.equal((await call('PATCH', '/api/me', { token: dad.token, json: {} })).status, 400);
+  const seen = (await call('GET', '/api/users', { token: mom.token })).data.find((u) => u.id === dad.user.id);
+  assert.equal(seen.color, colors[4]);
+});
+
 test('calendar and reminders', async () => {
   const { mom, dad } = await setup();
   const add = (json) => call('POST', '/api/events', { token: mom.token, json });

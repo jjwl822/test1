@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from '../vendor/preact-htm.js';
 import { api, compressImage, isVideoFile, MAX_VIDEO_BYTES, onLive, videoPoster } from './api.js';
-import { ago, Avatar, avatarUrlOf, Confirm, go, html, Icon, MediaViewer, Sheet, Spinner, TopBar, useBackToClose, useStore } from './ui.js';
+import { ago, Avatar, avatarUrlOf, colorOf, Confirm, go, html, Icon, MediaViewer, Sheet, Spinner, TopBar, useBackToClose, useStore } from './ui.js';
 
 const MAX_MEDIA = 10;
 const NEW = 'new';
@@ -175,7 +175,7 @@ function PostDetail({ post, me, onBack, onChanged, onEdit, onDeleted }) {
   return html`<${TopBar} title="게시물" small onBack=${onBack} />
     <div class="scroll">
       <div class="row" style="padding:8px 8px 8px 12px">
-        <${Avatar} name=${post.authorName} url=${avatarUrlOf(post.authorId)} size=${34} ring />
+        <${Avatar} name=${post.authorName} url=${avatarUrlOf(post.authorId)} color=${colorOf(post.authorId)} size=${34} ring />
         <div class="grow bold">${post.authorName}</div>
         ${mine && html`<button class="icon-btn" onClick=${() => setMenu(true)} aria-label="더보기"><${Icon} name="more" /></button>`}
       </div>
@@ -257,7 +257,7 @@ function Comments({ post, me, onClose }) {
       ${list?.length === 0 && html`<div class="empty"><div class="bold" style="color:var(--fg)">아직 댓글이 없습니다</div>댓글을 남겨보세요.</div>`}
       ${list?.map(
         (c) => html`<div class="comment">
-          <${Avatar} name=${c.authorName} url=${avatarUrlOf(c.authorId)} size=${32} />
+          <${Avatar} name=${c.authorName} url=${avatarUrlOf(c.authorId)} color=${colorOf(c.authorId)} size=${32} />
           <div class="grow">
             <div><b class="small">${c.authorName}</b> <span class="tiny muted">${ago(c.createdAt)}</span></div>
             <div style="white-space:pre-wrap">${c.text}</div>
@@ -269,7 +269,7 @@ function Comments({ post, me, onClose }) {
     </div>
     ${error && html`<div class="error">${error}</div>`}
     <div class="row" style="padding:8px 12px;border-top:0.5px solid var(--line)">
-      <${Avatar} name=${me.displayName} url=${me.avatarUrl} size=${34} />
+      <${Avatar} name=${me.displayName} url=${me.avatarUrl} color=${me.color} size=${34} />
       <input
         class="pill-input"
         placeholder=${`${me.displayName}(으)로 댓글 달기...`}

@@ -8,6 +8,8 @@ data class User(
     val username: String,
     val displayName: String,
     val avatarUrl: String? = null,
+    /** Chat bubble color, e.g. "#1877F2". */
+    val color: String? = null,
 )
 
 @Serializable

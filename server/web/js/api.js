@@ -50,6 +50,8 @@ export const api = {
   logout: (endpoint) => post('/api/logout', { endpoint }),
   users: () => get('/api/users'),
   updateName: (displayName) => patch('/api/me', { displayName }),
+  updateColor: (color) => patch('/api/me', { color }),
+  colors: () => get('/api/colors'),
   uploadAvatar: (jpeg) => upload('/api/me/avatar', jpeg),
   deleteAvatar: () => del('/api/me/avatar'),
 

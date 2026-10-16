@@ -300,3 +300,9 @@ textarea.field { resize: none; min-height: 90px; }
 .game:active { background: var(--fill); }
 .game .emoji { font-size: 34px; width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center; background: var(--fill); flex-shrink: 0; }
 .game-frame { flex: 1; width: 100%; border: 0; background: var(--bg); }
+
+/* ---- Bubble color picker --------------------------------------------------------------------- */
+
+.colors { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; padding: 4px 16px; justify-items: center; }
+.swatch { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; }
+.swatch.on { box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--fg); }

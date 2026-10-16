@@ -38,6 +38,9 @@ class ServerContractTest {
         val users = decode<List<User>>("users")
         assertTrue(users.first { it.username == "mom" }.avatarUrl!!.startsWith("/api/media/"))
         assertNull(users.first { it.username == "dad" }.avatarUrl)
+        // Each person has their own bubble color.
+        assertEquals(users.size, users.map { it.color }.toSet().size)
+        assertTrue(users.all { it.color!!.matches(Regex("#[0-9A-F]{6}")) })
     }
 
     @Test

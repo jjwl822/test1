@@ -152,6 +152,7 @@ function migrate(db) {
   const columns = (table) => db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
   if (!columns('posts').includes('edited_at')) db.exec('ALTER TABLE posts ADD COLUMN edited_at INTEGER');
   if (!columns('users').includes('avatar')) db.exec('ALTER TABLE users ADD COLUMN avatar TEXT');
+  if (!columns('users').includes('color')) db.exec('ALTER TABLE users ADD COLUMN color TEXT');
 
   // SQLite can't change a CHECK constraint, so the messages table is rebuilt to allow polls,
   // replies and deleted messages.

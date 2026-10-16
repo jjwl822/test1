@@ -5,6 +5,7 @@ import {
   ago,
   Avatar,
   avatarUrlOf,
+  colorOf,
   Confirm,
   dayLabel,
   Dialog,
@@ -32,7 +33,7 @@ export function ChatList({ me, conversations }) {
   const { rooms, error } = conversations;
   return html`<${TopBar} title="가족 메신저">
       <button class="icon-btn" onClick=${() => go('/profile')} aria-label="내 프로필">
-        <${Avatar} name=${me.displayName} url=${me.avatarUrl} size=${32} />
+        <${Avatar} name=${me.displayName} url=${me.avatarUrl} color=${me.color} size=${32} />
       </button>
     <//>
     <div class="scroll">
@@ -44,7 +45,14 @@ export function ChatList({ me, conversations }) {
         const unread = room.unreadCount > 0;
         const text = last ? `${room.kind === 'group' ? `${last.senderName}: ` : ''}${preview(last)} · ${ago(last.createdAt)}` : '대화를 시작해 보세요';
         return html`<button class=${`room ${unread ? 'unread' : ''}`} onClick=${() => go(`/chat/${room.id}`)}>
-          <${Avatar} name=${room.title} url=${room.userId ? avatarUrlOf(room.userId) : null} size=${56} ring=${unread} group=${room.kind === 'group'} />
+          <${Avatar}
+            name=${room.title}
+            url=${room.userId ? avatarUrlOf(room.userId) : null}
+            color=${room.userId ? colorOf(room.userId) : null}
+            size=${56}
+            ring=${unread}
+            group=${room.kind === 'group'}
+          />
           <div class="grow">
             <div class="name">${room.title}</div>
             <div class="last small muted ellipsis">${text}</div>
@@ -298,6 +306,8 @@ export function ChatRoom({ id, title, me, onBack }) {
 function MessageRow({ m, me, first, showName, unread, onLongPress, onImage, onReact, onVote }) {
   const mine = m.senderId === me.id;
   const press = longPress(onLongPress);
+  // Every family member's messages appear in their own color, for everyone.
+  const color = colorOf(m.senderId);
   let bubble;
   if (m.deleted) {
     bubble = html`<div class="bubble deleted">삭제된 메시지입니다</div>`;
@@ -309,12 +319,14 @@ function MessageRow({ m, me, first, showName, unread, onLongPress, onImage, onRe
       <div class="bubble photo" ...${press} onClick=${() => onImage(m.imageUrl)}><img src=${m.imageUrl} alt="사진" loading="lazy" /></div>
     </div>`;
   } else {
-    bubble = html`<div class="bubble" ...${press}>${m.replyTo && html`<${Quote} r=${m.replyTo} />`}${m.text}</div>`;
+    bubble = html`<div class="bubble" style=${`background:${color};color:#fff`} ...${press}>
+      ${m.replyTo && html`<${Quote} r=${m.replyTo} />`}${m.text}
+    </div>`;
   }
   return html`<div class=${`msg ${mine ? 'mine' : ''} ${first ? 'first' : ''}`}>
-    ${!mine && html`<div class="av">${first && html`<${Avatar} name=${m.senderName} url=${avatarUrlOf(m.senderId)} size=${30} />`}</div>`}
+    ${!mine && html`<div class="av">${first && html`<${Avatar} name=${m.senderName} url=${avatarUrlOf(m.senderId)} color=${color} size=${30} />`}</div>`}
     <div class="body">
-      ${showName && html`<div class="sender">${m.senderName}</div>`}
+      ${showName && html`<div class="sender" style=${`color:${color}`}>${m.senderName}</div>`}
       <div class="line">
         ${bubble}
         <div class="meta">

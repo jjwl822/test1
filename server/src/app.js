@@ -56,12 +56,30 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ha, hb);
 }
 
+/**
+ * Chat bubble colors. Everyone gets one by join order and can pick another in their profile.
+ * All are dark enough for white text.
+ */
+export const BUBBLE_COLORS = [
+  '#1877F2', // blue
+  '#E0533A', // coral
+  '#1A8F52', // green
+  '#7C4DDB', // purple
+  '#D63F7C', // pink
+  '#C2620A', // orange
+  '#0E8582', // teal
+  '#4F5BD5', // indigo
+  '#D13A41', // red
+  '#8E5B3A', // brown
+];
+
 function toUser(row) {
   return {
     id: row.id,
     username: row.username,
     displayName: row.display_name,
     avatarUrl: row.avatar ? `/api/media/${row.avatar}` : null,
+    color: BUBBLE_COLORS.includes(row.color) ? row.color : BUBBLE_COLORS[(row.id - 1) % BUBBLE_COLORS.length],
   };
 }
 
@@ -219,10 +237,21 @@ export function createServer({
   const profileChanged = (id) =>
     broadcastAll({ type: 'user', user: toUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id)) });
 
+  app.get('/api/colors', auth, (_req, res) => res.json(BUBBLE_COLORS));
+
+  // Body: { displayName?, color? } — either or both.
   app.patch('/api/me', auth, (req, res) => {
-    const name = typeof req.body?.displayName === 'string' ? req.body.displayName.trim() : '';
-    if (name.length < 1 || name.length > 20) return res.status(400).json({ error: '이름은 1~20자로 입력하세요.' });
-    db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(name, req.user.id);
+    const { displayName, color } = req.body ?? {};
+    if (displayName === undefined && color === undefined) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+    if (displayName !== undefined) {
+      const name = typeof displayName === 'string' ? displayName.trim() : '';
+      if (name.length < 1 || name.length > 20) return res.status(400).json({ error: '이름은 1~20자로 입력하세요.' });
+    }
+    if (color !== undefined && !BUBBLE_COLORS.includes(color)) return res.status(400).json({ error: '고를 수 없는 색입니다.' });
+    if (displayName !== undefined) {
+      db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(displayName.trim(), req.user.id);
+    }
+    if (color !== undefined) db.prepare('UPDATE users SET color = ? WHERE id = ?').run(color, req.user.id);
     profileChanged(req.user.id);
     res.json(toUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)));
   });

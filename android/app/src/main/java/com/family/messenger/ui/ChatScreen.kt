@@ -183,6 +183,8 @@ fun ChatScreen(app: FamilyApp, conversationId: String, title: String, me: User, 
                             showName = isGroup && !mine && firstOfRun,
                             avatarUrl = app.avatarUrl(users[message.senderId]),
                             senderName = users[message.senderId]?.displayName ?: message.senderName,
+                            // Every family member's messages show in their own color, for everyone.
+                            color = bubbleColor(users[message.senderId]?.color),
                             unread = state.unreadCount(message),
                             me = me,
                             imageUrl = message.imageUrl?.let(app.api::url),
@@ -340,6 +342,7 @@ private fun MessageRow(
     showName: Boolean,
     avatarUrl: String?,
     senderName: String,
+    color: Color,
     unread: Int,
     me: User,
     imageUrl: String?,
@@ -358,7 +361,7 @@ private fun MessageRow(
         if (!mine) {
             // Avatar only on the first message of a run, like Instagram DMs.
             Box(Modifier.width(36.dp)) {
-                if (firstOfRun) Avatar(senderName, size = 30.dp, imageUrl = avatarUrl)
+                if (firstOfRun) Avatar(senderName, size = 30.dp, imageUrl = avatarUrl, color = color)
             }
             Spacer(Modifier.width(6.dp))
         }
@@ -367,7 +370,8 @@ private fun MessageRow(
                 Text(
                     senderName,
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                    color = color,
                     modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
                 )
             }
@@ -381,7 +385,7 @@ private fun MessageRow(
                     message.deleted -> DeletedBubble()
                     message.isPoll && message.poll != null -> PollCard(message, me, bubbleModifier, onVote)
                     imageUrl != null -> ImageBubble(message, imageUrl, mine, bubbleModifier)
-                    else -> TextBubble(message, mine, bubbleModifier)
+                    else -> TextBubble(message, color, bubbleModifier)
                 }
                 if (!mine) Meta(message, unread, alignEnd = false)
             }
@@ -437,9 +441,9 @@ private fun Meta(message: Message, unread: Int, alignEnd: Boolean) {
 }
 
 @Composable
-private fun TextBubble(message: Message, mine: Boolean, modifier: Modifier) {
-    val background = if (mine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-    val content = if (mine) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+private fun TextBubble(message: Message, background: Color, modifier: Modifier) {
+    // All bubble colors are dark enough for white text.
+    val content = Color.White
     Column(
         modifier
             .widthIn(max = 270.dp)

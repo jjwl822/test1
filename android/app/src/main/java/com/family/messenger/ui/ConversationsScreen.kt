@@ -19,7 +19,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,6 +36,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -79,7 +82,7 @@ fun ConversationsScreen(
                 title = { Text("가족 메신저", style = MaterialTheme.typography.titleLarge) },
                 actions = {
                     Box(Modifier.padding(end = 12.dp).clickable { showProfile = true }) {
-                        Avatar(me.displayName, size = 34.dp, imageUrl = app.avatarUrl(users[me.id] ?: me))
+                        Avatar(me.displayName, size = 34.dp, imageUrl = app.avatarUrl(users[me.id] ?: me), color = bubbleColor((users[me.id] ?: me).color))
                     }
                 },
             )
@@ -107,7 +110,8 @@ fun ConversationsScreen(
                 }
                 error?.let { item { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) } }
                 items(conversations, key = { it.id }) { conversation ->
-                    ConversationRow(conversation, imageUrl = app.avatarUrl(users[conversation.userId])) {
+                    val person = users[conversation.userId]
+                    ConversationRow(conversation, imageUrl = app.avatarUrl(person), color = person?.color?.let(::bubbleColor)) {
                         onOpen(conversation.id, conversation.title)
                     }
                 }
@@ -129,7 +133,7 @@ fun ConversationsScreen(
 }
 
 @Composable
-private fun ConversationRow(conversation: Conversation, imageUrl: String?, onClick: () -> Unit) {
+private fun ConversationRow(conversation: Conversation, imageUrl: String?, color: Color?, onClick: () -> Unit) {
     val unread = conversation.unreadCount > 0
     Row(
         modifier = Modifier
@@ -139,7 +143,7 @@ private fun ConversationRow(conversation: Conversation, imageUrl: String?, onCli
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Avatar(conversation.title, conversation.isGroup, size = 56.dp, ring = unread, imageUrl = imageUrl)
+        Avatar(conversation.title, conversation.isGroup, size = 56.dp, ring = unread, imageUrl = imageUrl, color = color)
         Column(Modifier.weight(1f)) {
             Text(
                 conversation.title,
@@ -195,6 +199,8 @@ fun Avatar(
     size: Dp = 48.dp,
     ring: Boolean = false,
     imageUrl: String? = null,
+    /** Without a photo, the first letter sits on this color (the person's bubble color). */
+    color: Color? = null,
 ) {
     val ringWidth = if (ring) (size.value / 20f).coerceAtLeast(2f).dp else 0.dp
     Box(
@@ -203,7 +209,7 @@ fun Avatar(
             .then(if (ring) Modifier.border(ringWidth, StoryGradient, CircleShape) else Modifier)
             .padding(ringWidth * 1.5f)
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primaryContainer),
+            .background(if (imageUrl == null && color != null) color else MaterialTheme.colorScheme.primaryContainer),
         contentAlignment = Alignment.Center,
     ) {
         when {
@@ -237,6 +243,8 @@ private fun ProfileDialog(app: FamilyApp, me: User, onDismiss: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var confirmLogout by remember { mutableStateOf(false) }
+    var colors by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(Unit) { colors = runCatching { app.api.bubbleColors() }.getOrDefault(emptyList()) }
 
     fun launchAction(block: suspend () -> Unit) {
         busy = true
@@ -267,7 +275,7 @@ private fun ProfileDialog(app: FamilyApp, me: User, onDismiss: () -> Unit) {
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                 Box(contentAlignment = Alignment.Center) {
-                    Avatar(me.displayName, size = 96.dp, ring = true, imageUrl = app.avatarUrl(me))
+                    Avatar(me.displayName, size = 96.dp, ring = true, imageUrl = app.avatarUrl(me), color = bubbleColor(me.color))
                     if (busy) CircularProgressIndicator()
                 }
                 Row {
@@ -288,6 +296,25 @@ private fun ProfileDialog(app: FamilyApp, me: User, onDismiss: () -> Unit) {
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (colors.isNotEmpty()) {
+                    Text(
+                        "내 말풍선 색",
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp),
+                    )
+                    ColorPicker(colors, selected = me.color, enabled = !busy) { picked ->
+                        launchAction { app.directory.update(app.api.updateColor(picked)) }
+                    }
+                    Text(
+                        "안녕! 이렇게 보여요 😊",
+                        color = Color.White,
+                        modifier = Modifier
+                            .padding(top = 10.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(bubbleColor(me.color))
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 TextButton(onClick = { confirmLogout = true }, modifier = Modifier.padding(top = 8.dp)) {
                     Text("로그아웃", color = MaterialTheme.colorScheme.error)
@@ -329,5 +356,31 @@ private fun ProfileDialog(app: FamilyApp, me: User, onDismiss: () -> Unit) {
             },
             dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("취소") } },
         )
+    }
+}
+
+/** Round swatches of the bubble colors; the chosen one has a ring and a check. */
+@Composable
+private fun ColorPicker(colors: List<String>, selected: String?, enabled: Boolean, onPick: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        colors.chunked(5).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { hex ->
+                    val on = hex.equals(selected, ignoreCase = true)
+                    Box(
+                        Modifier
+                            .size(38.dp)
+                            .then(if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
+                            .padding(if (on) 4.dp else 0.dp)
+                            .clip(CircleShape)
+                            .background(bubbleColor(hex))
+                            .clickable(enabled = enabled && !on) { onPick(hex) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (on) Icon(Icons.Filled.Check, contentDescription = "선택됨", tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
     }
 }

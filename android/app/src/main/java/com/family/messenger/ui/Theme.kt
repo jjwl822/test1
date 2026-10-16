@@ -20,6 +20,10 @@ import java.util.Locale
 private val InstaBlue = Color(0xFF0095F6)
 val HeartRed = Color(0xFFFF3040)
 
+/** A family member's chat bubble color ("#RRGGBB" from the server); blue if unknown. */
+fun bubbleColor(hex: String?): Color =
+    runCatching { Color(android.graphics.Color.parseColor(hex ?: "#1877F2")) }.getOrDefault(Color(0xFF1877F2))
+
 /** The orange-pink-purple ring Instagram draws around stories. */
 val StoryGradient = Brush.linearGradient(
     listOf(Color(0xFFFEDA75), Color(0xFFFA7E1E), Color(0xFFD62976), Color(0xFF962FBF), Color(0xFF4F5BD5)),

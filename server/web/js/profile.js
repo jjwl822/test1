@@ -74,6 +74,10 @@ export function ProfileScreen({ me, onBack }) {
   const [saved, setSaved] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const file = useRef(null);
+  const [colors, setColors] = useState([]);
+  useEffect(() => {
+    api.colors().then(setColors).catch(() => {});
+  }, []);
 
   async function act(work) {
     setBusy(true);
@@ -101,7 +105,7 @@ export function ProfileScreen({ me, onBack }) {
     <${TopBar} title="내 프로필" small onBack=${onBack} />
     <div class="scroll">
       <div style="display:flex;flex-direction:column;align-items:center;padding:24px 16px 8px;gap:8px">
-        <${Avatar} name=${me.displayName} url=${me.avatarUrl} size=${96} ring />
+        <${Avatar} name=${me.displayName} url=${me.avatarUrl} color=${me.color} size=${96} ring />
         <div class="row">
           <button class="link" disabled=${busy} onClick=${() => file.current.click()}>사진 변경</button>
           ${me.avatarUrl && html`<button class="link danger" disabled=${busy} onClick=${() => act(() => api.deleteAvatar())}>사진 삭제</button>`}
@@ -133,6 +137,22 @@ export function ProfileScreen({ me, onBack }) {
         ${saved && html`<div class="small" style="color:var(--blue);margin-top:4px">저장했어요</div>`}
         <div class="small muted" style="margin-top:6px">아이디: ${me.username}</div>
         ${error && html`<div class="error" style="padding:8px 0">${error}</div>`}
+      </div>
+      <div class="section-title">내 말풍선 색</div>
+      <div class="small muted" style="padding:0 16px 8px">가족 모두에게 내 메시지가 이 색으로 보여요.</div>
+      <div class="colors">
+        ${colors.map(
+          (c) => html`<button
+            class=${`swatch ${c === me.color ? 'on' : ''}`}
+            style=${`background:${c}`}
+            aria-label=${`색 ${c}`}
+            disabled=${busy}
+            onClick=${() => c !== me.color && act(() => api.updateColor(c))}
+          >${c === me.color && html`<${Icon} name="check" size="sm" color="#fff" />`}</button>`,
+        )}
+      </div>
+      <div style="padding:8px 16px 0">
+        <span class="bubble" style=${`background:${me.color};color:#fff;display:inline-block`}>안녕! 이렇게 보여요 😊</span>
       </div>
       <div class="section-title">알림</div>
       <${PushBanner} always />

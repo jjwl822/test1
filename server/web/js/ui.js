@@ -61,8 +61,10 @@ export function useStore() {
 }
 
 /** Round avatar: profile photo if set, else first letter. [ring] adds the story gradient. */
-export function Avatar({ name = '', url, size = 44, ring = false, group = false }) {
-  const inner = html`<div class="avatar" style=${`width:${size}px;height:${size}px;font-size:${Math.round(size * 0.4)}px`}>
+export function Avatar({ name = '', url, size = 44, ring = false, group = false, color }) {
+  // Without a photo, the first letter sits on the person's own color.
+  const tint = !url && color ? `;background:${color};color:#fff` : '';
+  const inner = html`<div class="avatar" style=${`width:${size}px;height:${size}px;font-size:${Math.round(size * 0.4)}px${tint}`}>
     ${url ? html`<img src=${url} alt="" loading="lazy" />` : group ? html`<${Icon} name="users" size="sm" />` : name.slice(0, 1)}
   </div>`;
   return ring ? html`<div class="ring">${inner}</div>` : inner;
@@ -70,6 +72,11 @@ export function Avatar({ name = '', url, size = 44, ring = false, group = false 
 
 export function avatarUrlOf(userId) {
   return store.user(userId)?.avatarUrl ?? null;
+}
+
+/** The person's chat bubble color (chosen in their profile). */
+export function colorOf(userId) {
+  return store.user(userId)?.color ?? '#1877F2';
 }
 
 export function Spinner() {
