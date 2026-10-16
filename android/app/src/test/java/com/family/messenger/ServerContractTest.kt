@@ -1,5 +1,8 @@
 package com.family.messenger
 
+import com.family.messenger.call.CallSignal
+import com.family.messenger.call.IceConfig
+import com.family.messenger.call.PendingCall
 import com.family.messenger.data.Api
 import com.family.messenger.data.AuthResponse
 import com.family.messenger.data.CalendarEvent
@@ -109,5 +112,26 @@ class ServerContractTest {
         assertEquals(listOf("치과"), state.on(LocalDate.of(2026, 10, 16)).map { it.title })
         val upcoming = state.upcoming(LocalDate.of(2026, 10, 15), count = 2)
         assertEquals(listOf("생일", "치과"), upcoming.map { it.second.title })
+    }
+
+    @Test
+    fun callSignalsAndCallApi() {
+        val signals = decode<List<CallSignal>>("call_signals")
+        assertEquals(listOf("invite", "ice", "accept", "answered-elsewhere", "end"), signals.map { it.action })
+        val invite = signals.first()
+        assertEquals("엄마", invite.from!!.displayName)
+        assertTrue(invite.video)
+        assertEquals("v=0 offer", invite.sdp)
+        assertEquals("0", signals[1].candidate!!["sdpMid"].toString().trim('"'))
+        assertEquals("phone-1", signals[3].except)
+
+        val pending = decode<PendingCall?>("call_pending")!!
+        assertEquals(invite.callId, pending.callId)
+        assertEquals(1, pending.candidates.size)
+        assertNull(decode<PendingCall?>("call_none"))
+
+        val ice = decode<IceConfig>("call_ice")
+        assertTrue(ice.iceServers.isNotEmpty())
+        assertTrue(!ice.relay)
     }
 }

@@ -1,1 +1,1 @@
-[{"id":2,"list":"todo","text":"청소","done":false,"authorId":1,"authorName":"엄마","doneByName":null,"createdAt":1792145616301,"doneAt":null},{"id":1,"list":"shopping","text":"우유","done":true,"authorId":1,"authorName":"엄마","doneByName":"아빠","createdAt":1792145616295,"doneAt":1792145616298}]
+[{"id":2,"list":"todo","text":"청소","done":false,"authorId":1,"authorName":"엄마","doneByName":null,"createdAt":1792146897589,"doneAt":null},{"id":1,"list":"shopping","text":"우유","done":true,"authorId":1,"authorName":"엄마","doneByName":"아빠","createdAt":1792146897584,"doneAt":1792146897587}]

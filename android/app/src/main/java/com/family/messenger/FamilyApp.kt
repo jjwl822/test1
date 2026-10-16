@@ -24,6 +24,7 @@ class FamilyApp : Application(), ImageLoaderFactory {
         api = Api(session)
         directory = UserDirectory(api, session)
         Notifications.createChannels(this)
+        com.family.messenger.call.CallManager.init(this)
     }
 
     // Images are only served to logged-in family members, so Coil uses our authenticated client.

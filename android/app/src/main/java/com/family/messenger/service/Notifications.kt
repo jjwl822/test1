@@ -8,6 +8,10 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.Person
+import com.family.messenger.call.CallActionReceiver
+import com.family.messenger.call.CallActivity
+import com.family.messenger.call.CallManager
 import com.family.messenger.MainActivity
 import com.family.messenger.R
 import com.family.messenger.data.Message
@@ -16,7 +20,11 @@ import com.family.messenger.data.MessageBus
 object Notifications {
     private const val CHANNEL_MESSAGES = "messages"
     private const val CHANNEL_SERVICE = "connection"
+    private const val CHANNEL_CALLS = "calls"
+    private const val CHANNEL_ONGOING = "ongoing_call"
     const val SERVICE_ID = 1
+    const val CALL_ID = 2
+    const val ONGOING_CALL_ID = 3
 
     fun createChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
@@ -29,6 +37,89 @@ object Notifications {
                 setShowBadge(false)
             },
         )
+        // The ringtone is played by CallManager (so it stops the moment the call is answered).
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_CALLS, "걸려오는 전화", NotificationManager.IMPORTANCE_HIGH).apply {
+                setSound(null, null)
+                enableVibration(false)
+            },
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_ONGOING, "통화 중", NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) },
+        )
+    }
+
+    /** Shows the full-screen incoming-call notification while ringing, and removes it otherwise. */
+    fun updateCall(context: Context, state: CallManager.State) {
+        val manager = NotificationManagerCompat.from(context)
+        if (state.status != CallManager.Status.INCOMING) {
+            manager.cancel(CALL_ID)
+            return
+        }
+        if (!manager.areNotificationsEnabled()) return
+        val caller = Person.Builder().setName(state.peer?.displayName ?: "가족").setImportant(true).build()
+        val answer = PendingIntent.getActivity(
+            context,
+            1,
+            CallActivity.answerIntent(context),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val screen = PendingIntent.getActivity(
+            context,
+            2,
+            CallActivity.showIntent(context),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val decline = PendingIntent.getBroadcast(
+            context,
+            3,
+            Intent(context, CallActionReceiver::class.java).setAction(CallActionReceiver.ACTION_DECLINE),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_CALLS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("${caller.name}님의 ${if (state.video) "영상통화" else "음성통화"}")
+            .setContentText("전화가 왔어요")
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setOngoing(true)
+            .setContentIntent(screen)
+            .setFullScreenIntent(screen, true)
+            .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, decline, answer).setIsVideo(state.video))
+            .build()
+        try {
+            manager.notify(CALL_ID, notification)
+        } catch (_: SecurityException) {
+            // Notification permission was revoked.
+        } catch (_: IllegalArgumentException) {
+            // The system refused the call style.
+        }
+    }
+
+    /** The "통화 중" notification shown by CallService while a call is up. */
+    fun ongoingCall(context: Context, state: CallManager.State): Notification {
+        val hangUp = PendingIntent.getBroadcast(
+            context,
+            4,
+            Intent(context, CallActionReceiver::class.java).setAction(CallActionReceiver.ACTION_HANG_UP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val screen = PendingIntent.getActivity(
+            context,
+            2,
+            CallActivity.showIntent(context),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val person = Person.Builder().setName(state.peer?.displayName ?: "가족").build()
+        return NotificationCompat.Builder(context, CHANNEL_ONGOING)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("${person.name}님과 통화 중")
+            .setContentText("눌러서 통화 화면으로")
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setOngoing(true)
+            .setContentIntent(screen)
+            .setStyle(NotificationCompat.CallStyle.forOngoingCall(person, hangUp).setIsVideo(state.video))
+            .build()
     }
 
     fun service(context: Context): Notification =

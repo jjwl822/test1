@@ -36,6 +36,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
@@ -89,6 +91,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.family.messenger.FamilyApp
+import com.family.messenger.call.CallActivity
+import com.family.messenger.call.CallPeer
 import com.family.messenger.data.Message
 import com.family.messenger.data.MessageBus
 import com.family.messenger.data.User
@@ -144,6 +148,22 @@ fun ChatScreen(app: FamilyApp, conversationId: String, title: String, me: User, 
                 title = { Text(title, style = MaterialTheme.typography.titleLarge) },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로") }
+                },
+                actions = {
+                    // 1:1 rooms ("dm-3-7") can call the other person.
+                    val peerId = conversationId.removePrefix("dm-").split("-").mapNotNull(String::toLongOrNull)
+                        .takeIf { conversationId.startsWith("dm-") && it.size == 2 }
+                        ?.firstOrNull { it != me.id }
+                    if (peerId != null) {
+                        val call = { video: Boolean ->
+                            app.startActivity(
+                                CallActivity.startIntent(app, CallPeer(peerId, title), video)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                        IconButton(onClick = { call(false) }) { Icon(Icons.Filled.Call, contentDescription = "음성통화") }
+                        IconButton(onClick = { call(true) }) { Icon(Icons.Filled.Videocam, contentDescription = "영상통화") }
+                    }
                 },
             )
         },

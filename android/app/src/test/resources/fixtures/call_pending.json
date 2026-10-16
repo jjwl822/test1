@@ -1,0 +1,1 @@
+{"callId":"c1","from":{"id":1,"displayName":"엄마"},"video":true,"sdp":"v=0 offer","candidates":[{"candidate":"candidate:1 1 udp 2122260223 192.168.0.5 54321 typ host","sdpMid":"0","sdpMLineIndex":0}]}

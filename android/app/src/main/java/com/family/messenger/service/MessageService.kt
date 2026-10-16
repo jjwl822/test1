@@ -9,7 +9,10 @@ import android.os.IBinder
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.family.messenger.FamilyApp
+import com.family.messenger.call.CallManager
+import com.family.messenger.call.CallSignal
 import com.family.messenger.data.Api
+import com.family.messenger.data.LiveSocket
 import com.family.messenger.data.MessageBus
 import com.family.messenger.data.SocketEvent
 import kotlinx.coroutines.CoroutineScope
@@ -82,13 +85,20 @@ class MessageService : Service() {
 
     private inner class Listener : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            LiveSocket.socket = webSocket
             scope.launch {
                 attempt = 0
                 MessageBus.connected.value = true
+                CallManager.checkPending()
             }
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            if (text.contains("\"type\":\"call\"")) {
+                runCatching { Api.json.decodeFromString<CallSignal>(text) }.getOrNull()
+                    ?.takeIf { it.type == "call" }
+                    ?.let { CallManager.onSignal(it); return }
+            }
             val event = runCatching { Api.json.decodeFromString<SocketEvent>(text) }.getOrNull() ?: return
             scope.launch { handle(event) }
         }
@@ -135,10 +145,12 @@ class MessageService : Service() {
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (LiveSocket.socket === webSocket) LiveSocket.socket = null
             scope.launch { if (socket === webSocket) scheduleReconnect() }
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            if (LiveSocket.socket === webSocket) LiveSocket.socket = null
             scope.launch {
                 if (socket !== webSocket) return@launch
                 if (response?.code == 401) {
@@ -154,6 +166,7 @@ class MessageService : Service() {
         scope.cancel()
         socket?.close(1000, null)
         socket = null
+        LiveSocket.socket = null
         MessageBus.connected.value = false
         super.onDestroy()
     }

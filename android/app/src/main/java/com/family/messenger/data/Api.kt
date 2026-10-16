@@ -160,6 +160,12 @@ class Api(private val session: Session) {
         call<JsonObject>(Request.Builder().url(url("/api/events/$id")).delete().build())
     }
 
+    suspend fun callIce(): com.family.messenger.call.IceConfig = call(Request.Builder().url(url("/api/calls/ice")).build())
+
+    /** A call ringing for me right now, or null. */
+    suspend fun pendingCall(): com.family.messenger.call.PendingCall? =
+        call<com.family.messenger.call.PendingCall?>(Request.Builder().url(url("/api/calls/pending")).build())
+
     suspend fun games(): List<GameInfo> = call(Request.Builder().url(url("/api/games")).build())
 
     suspend fun listItems(): List<ListItem> = call(Request.Builder().url(url("/api/lists/items")).build())

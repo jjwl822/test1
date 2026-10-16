@@ -57,8 +57,23 @@ save('items', await call('GET', '/api/lists/items', dad.token));
 // a fresh socket to receive reminders
 const ws2 = new WebSocket(`${base.replace('http', 'ws')}/ws`, { headers: { authorization: `Bearer ${mom.token}` } });
 ws2.on('message', (d) => events.push(d.toString()));
+await new Promise((r) => ws2.on('open', r));
+// A call from mom to dad: what dad's phone receives, and the call API responses.
+const candidate = { candidate: 'candidate:1 1 udp 2122260223 192.168.0.5 54321 typ host', sdpMid: '0', sdpMLineIndex: 0 };
+ws2.send(JSON.stringify({ type: 'call', action: 'invite', callId: 'c1', to: dad.user.id, video: true, sdp: 'v=0 offer' }));
+await new Promise((r) => setTimeout(r, 100));
+ws2.send(JSON.stringify({ type: 'call', action: 'ice', callId: 'c1', candidate }));
+await new Promise((r) => setTimeout(r, 100));
+save('call_pending', await call('GET', '/api/calls/pending', dad.token));
+save('call_ice', await call('GET', '/api/calls/ice', dad.token));
+ws.send(JSON.stringify({ type: 'call', action: 'accept', callId: 'c1', sdp: 'v=0 answer', deviceId: 'phone-1' }));
+await new Promise((r) => setTimeout(r, 100));
+ws.send(JSON.stringify({ type: 'call', action: 'end', callId: 'c1' }));
 await new Promise((r) => setTimeout(r, 300));
-save('socket_events', '[' + events.join(',') + ']');
+save('call_none', await call('GET', '/api/calls/pending', dad.token));
+const isCall = (e) => JSON.parse(e).type === 'call';
+save('call_signals', '[' + events.filter(isCall).join(',') + ']');
+save('socket_events', '[' + events.filter((e) => !isCall(e)).join(',') + ']');
 ws.close(); ws2.close();
 await new Promise((r) => server.close(r));
 fs.rmSync(dataDir, { recursive: true, force: true });
