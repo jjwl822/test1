@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from '../vendor/preact-htm.js';
 import { api, compressImage, onLive } from './api.js';
+import { peerOf, startCall } from './call.js';
 import { PushBanner } from './profile.js';
 import {
   ago,
@@ -86,6 +87,8 @@ export function ChatRoom({ id, title, me, onBack }) {
   const stickToBottom = useRef(true);
   const firstLoad = useRef(true);
   const isGroup = id === 'family';
+  // 1:1 rooms get call buttons.
+  const peer = peerOf(id, me);
 
   const merge = (incoming) =>
     setMessages((current) => {
@@ -197,7 +200,11 @@ export function ChatRoom({ id, title, me, onBack }) {
   }
 
   return html`<div class="screen">
-    <${TopBar} title=${title} small onBack=${onBack} />
+    <${TopBar} title=${title} small onBack=${onBack}>
+      ${peer &&
+      html`<button class="icon-btn" onClick=${() => startCall(peer, false)} aria-label="음성통화"><${Icon} name="phone" /></button>
+        <button class="icon-btn" onClick=${() => startCall(peer, true)} aria-label="영상통화"><${Icon} name="video" /></button>`}
+    <//>
     <div
       class="scroll"
       ref=${scroller}

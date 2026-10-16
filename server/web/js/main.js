@@ -2,6 +2,7 @@
 import { render, useEffect, useState } from '../vendor/preact-htm.js';
 import { api, connect, disconnect, onLive, onLoggedOut, store, syncPush } from './api.js';
 import { ChatList, ChatRoom } from './chat.js';
+import { CallScreen, resumePendingCall } from './call.js';
 import { CalendarScreen } from './calendar.js';
 import { GamePlayer, GamesScreen } from './games.js';
 import { ListsScreen } from './lists.js';
@@ -112,7 +113,11 @@ function App() {
     connect();
     store.refreshUsers();
     syncPush();
-    const offConnected = onLive('connected', () => store.refreshUsers());
+    const offConnected = onLive('connected', () => {
+      store.refreshUsers();
+      // Reopened while someone is calling: show the incoming call.
+      resumePendingCall();
+    });
     // Banners for things happening elsewhere while the app is open.
     const offEvents = onLive(['message', 'reminder', 'post'], (data, type) => {
       const here = parseRoute();
@@ -148,14 +153,18 @@ function App() {
   let tab = route.name;
   switch (route.name) {
     case 'chat':
-      return html`<${ChatRoom} key=${route.id} id=${route.id} title=${titleOf(route.id)} me=${me} onBack=${() => go('/chats')} /><${Toasts} />`;
+      return html`<${ChatRoom} key=${route.id} id=${route.id} title=${titleOf(route.id)} me=${me} onBack=${() => go('/chats')} /><${Toasts} /><${CallScreen} />`;
+    case 'call':
+      // Opened from an incoming-call notification.
+      resumePendingCall(route.id).finally(() => go('/chats'));
+      return html`<${Spinner} /><${CallScreen} />`;
     case 'game':
-      return html`<${GamePlayer} key=${route.id} id=${route.id} onBack=${() => go('/games')} /><${Toasts} />`;
+      return html`<${GamePlayer} key=${route.id} id=${route.id} onBack=${() => go('/games')} /><${Toasts} /><${CallScreen} />`;
     case 'games':
       screen = html`<${GamesScreen} />`;
       break;
     case 'profile':
-      return html`<${ProfileScreen} me=${me} onBack=${() => go('/chats')} /><${Toasts} />`;
+      return html`<${ProfileScreen} me=${me} onBack=${() => go('/chats')} /><${Toasts} /><${CallScreen} />`;
     case 'story':
     case 'post':
       tab = 'story';
@@ -173,7 +182,7 @@ function App() {
   }
   return html`<div class="screen">${screen}</div>
     <${TabBar} current=${tab} unread=${unread} />
-    <${Toasts} />`;
+    <${Toasts} /><${CallScreen} />`;
 }
 
 render(html`<${App} />`, document.getElementById('app'));

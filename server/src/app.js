@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { openDatabase } from './db.js';
+import { createCalls } from './calls.js';
 import { participants, registerChatRoutes } from './chat.js';
 import { registerFamilyRoutes } from './family.js';
 import { registerFeedRoutes } from './feed.js';
@@ -90,6 +91,9 @@ export function createServer({
   reminderHour = 9,
   pushSend,
   gamesDir = path.join(WEB_DIR, 'games'),
+  turn,
+  fetchImpl,
+  ringSeconds,
 }) {
   if (!familyCode) throw new Error('familyCode is required');
   const uploadDir = path.join(dataDir, 'uploads');
@@ -297,7 +301,19 @@ export function createServer({
   });
 
   const notify = (userIds, payload) => push.notify(userIds, payload).catch((err) => console.warn(err));
-  registerChatRoutes(app, { db, auth, broadcast, saveFile, removeFiles, imageTypes: IMAGE_TYPES, notify });
+  const chat = registerChatRoutes(app, { db, auth, broadcast, saveFile, removeFiles, imageTypes: IMAGE_TYPES, notify });
+  const calls = createCalls({
+    db,
+    auth,
+    app,
+    sendTo: (userId, payload) => broadcast([userId], payload),
+    isOnline: (userId) => sockets.has(userId),
+    notify,
+    logMessage: chat.logMessage,
+    turn,
+    fetchImpl,
+    ringSeconds,
+  });
   registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes: Object.keys(MEDIA_TYPES), now, notify });
   registerGameRoutes(app, { db, auth, gamesDir });
   const family = registerFamilyRoutes(app, {
@@ -351,6 +367,7 @@ export function createServer({
         try {
           const msg = JSON.parse(data);
           if (msg.type === 'visibility') ws.visible = Boolean(msg.visible);
+          if (msg.type === 'call') calls.handle(user, msg);
         } catch {
           // ignore anything else
         }
@@ -360,7 +377,10 @@ export function createServer({
       ws.on('close', () => {
         const set = sockets.get(user.id);
         set?.delete(ws);
-        if (set?.size === 0) sockets.delete(user.id);
+        if (set?.size === 0) {
+          sockets.delete(user.id);
+          calls.onDisconnect(user.id);
+        }
       });
       ws.send(JSON.stringify({ type: 'hello', user }));
       // Deliver today's calendar and memory reminders as soon as the phone connects.
@@ -383,6 +403,7 @@ export function createServer({
     clearInterval(heartbeat);
     app.locals.stopCleanup?.();
     family.stop();
+    calls.stop();
     for (const ws of wss.clients) ws.terminate();
     db.close();
   });

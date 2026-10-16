@@ -48,7 +48,13 @@ function lanAddresses() {
 }
 
 const code = await familyCode();
-createServer({ familyCode: code, dataDir, reminderHour }).listen(port, () => {
+// Cloudflare relay for calls (optional): data/config.json { "turnKeyId": "...", "turnKeyToken": "..." }
+const config = readConfig();
+const turn = {
+  keyId: process.env.TURN_KEY_ID || config.turnKeyId,
+  token: process.env.TURN_KEY_API_TOKEN || config.turnKeyToken,
+};
+createServer({ familyCode: code, dataDir, reminderHour, turn }).listen(port, () => {
   const addresses = lanAddresses();
   console.log('========================================');
   console.log(' 가족 메신저 서버가 켜졌습니다');
@@ -61,6 +67,7 @@ createServer({ familyCode: code, dataDir, reminderHour }).listen(port, () => {
   }
   console.log(` 가족 코드: ${code}`);
   console.log(` 데이터 저장 위치: ${dataDir}`);
+  console.log(` 통화 중계(Cloudflare TURN): ${turn.keyId && turn.token ? '켜짐' : '꺼짐 (같은 와이파이 등 직접 연결만)'}`);
   console.log(' 이 창을 닫으면 서버가 꺼집니다.');
   console.log('========================================');
 });

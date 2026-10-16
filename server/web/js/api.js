@@ -91,6 +91,9 @@ export const api = {
 
   games: () => get('/api/games'),
 
+  callIce: () => get('/api/calls/ice'),
+  pendingCall: () => get('/api/calls/pending'),
+
   pushKey: () => get('/api/push/key'),
   pushSubscribe: (sub) => post('/api/push/subscribe', sub),
 };
@@ -113,6 +116,13 @@ document.addEventListener('visibilitychange', () => {
   // Phones drop sockets in the background; reconnect as soon as we're back.
   if (document.visibilityState === 'visible' && !stopped && (!socket || socket.readyState > WebSocket.OPEN)) connect();
 });
+
+/** Sends something over the live connection (call signals). Returns false when offline. */
+export function sendLive(data) {
+  if (socket?.readyState !== WebSocket.OPEN) return false;
+  socket.send(JSON.stringify(data));
+  return true;
+}
 
 export function connect() {
   stopped = false;

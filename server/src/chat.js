@@ -110,7 +110,7 @@ export function registerChatRoutes(app, { db, auth, broadcast, saveFile, removeF
     return { id: row.id };
   }
 
-  function saveMessage(conversationId, senderId, kind, text, image, replyTo, recipients, extra) {
+  function saveMessage(conversationId, senderId, kind, text, image, replyTo, recipients, extra, { silent = false } = {}) {
     const { lastInsertRowid: id } = db
       .prepare(
         `INSERT INTO messages (conversation_id, sender_id, kind, text, image, reply_to, created_at)
@@ -123,7 +123,7 @@ export function registerChatRoutes(app, { db, auth, broadcast, saveFile, removeF
     const message = toMessage(byId.get(id));
     broadcast(recipients, { type: 'message', message });
     const group = conversationId === GROUP_ID;
-    notify(
+    if (!silent) notify(
       recipients.filter((r) => r !== senderId),
       {
         title: group ? '우리 가족' : message.senderName,
@@ -279,4 +279,10 @@ export function registerChatRoutes(app, { db, auth, broadcast, saveFile, removeF
     if (image) removeFiles([image]);
     res.json(updated(req));
   });
+
+  return {
+    /** Adds a plain text line from [senderId] (used for "📞 ..." call records). */
+    logMessage: (conversationId, senderId, text, recipients, options) =>
+      saveMessage(conversationId, senderId, 'text', text, null, null, recipients, undefined, options),
+  };
 }
