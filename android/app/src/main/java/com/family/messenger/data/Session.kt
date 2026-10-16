@@ -15,8 +15,8 @@ class Session(context: Context) {
     private val _auth = MutableStateFlow(load())
     val auth: StateFlow<Auth?> = _auth.asStateFlow()
 
-    /** Last server address typed on the login screen, to prefill it next time. */
-    val lastServerUrl: String get() = prefs.getString(KEY_SERVER, "").orEmpty()
+    /** Last server address used, to prefill the login screen; our family's address the first time. */
+    val lastServerUrl: String get() = prefs.getString(KEY_SERVER, null) ?: DEFAULT_SERVER
 
     fun save(serverUrl: String, response: AuthResponse) {
         prefs.edit()
@@ -41,7 +41,12 @@ class Session(context: Context) {
     }
 
     private fun load(): Auth? {
-        val server = prefs.getString(KEY_SERVER, null) ?: return null
+        var server = prefs.getString(KEY_SERVER, null) ?: return null
+        // The temporary Cloudflare address changes on every restart; same server, now at our domain.
+        if (server.contains(".trycloudflare.com")) {
+            server = DEFAULT_SERVER
+            prefs.edit().putString(KEY_SERVER, server).apply()
+        }
         val token = prefs.getString(KEY_TOKEN, null) ?: return null
         val user = prefs.getString(KEY_USER, null)
             ?.let { runCatching { Api.json.decodeFromString<User>(it) }.getOrNull() }
@@ -51,6 +56,7 @@ class Session(context: Context) {
 
     private companion object {
         const val KEY_SERVER = "server_url"
+        const val DEFAULT_SERVER = "https://family.uhoui.com"
         const val KEY_TOKEN = "token"
         const val KEY_USER = "user"
     }

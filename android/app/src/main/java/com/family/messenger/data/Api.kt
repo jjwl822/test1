@@ -289,10 +289,19 @@ class Api(private val session: Session) {
             explicitNulls = false
         }
 
-        /** Accepts "192.168.0.10:3000" or "http://host:3000/" and returns "http://host:3000". */
+        /**
+         * Accepts "192.168.0.10:3000", "family.uhoui.com" or "http://host:3000/" and returns the
+         * address with a scheme: https for a web address (Cloudflare), http for a home-network IP.
+         */
         fun normalize(input: String): String {
             val trimmed = input.trim().trimEnd('/')
-            val withScheme = if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) trimmed else "http://$trimmed"
+            val host = trimmed.substringBefore('/').substringBefore(':')
+            val local = trimmed.contains(':') || host == "localhost" || host.all { it.isDigit() || it == '.' }
+            val withScheme = when {
+                trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
+                local -> "http://$trimmed"
+                else -> "https://$trimmed"
+            }
             if (withScheme.toHttpUrlOrNull() == null) throw ApiException("서버 주소가 올바르지 않습니다.")
             return withScheme
         }

@@ -102,7 +102,7 @@ fun LoginScreen(app: FamilyApp) {
                 value = server,
                 onValueChange = { server = it },
                 label = { Text("서버 주소") },
-                placeholder = { Text("예: 192.168.0.10:3000") },
+                placeholder = { Text("예: family.uhoui.com") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 modifier = Modifier.fillMaxWidth(),
