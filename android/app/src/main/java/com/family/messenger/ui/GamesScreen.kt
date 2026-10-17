@@ -3,6 +3,7 @@ package com.family.messenger.ui
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -182,6 +183,9 @@ fun GamePlayer(app: FamilyApp, game: GameInfo, onBack: () -> Unit) {
                     }
                 }
                 WebView(context).apply {
+                    // Without this the WebView sizes itself to its page, so games see a 0px-high
+                    // screen (full-height layouts collapse and canvases are created at 0x0).
+                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.mediaPlaybackRequiresUserGesture = false

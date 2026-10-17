@@ -19,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
+import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -65,8 +66,21 @@ class GamesScreenTest {
         compose.onNodeWithText("짝 맞추기").performClick()
         compose.onNodeWithText("🃏 짝 맞추기").assertExists()
         compose.onNodeWithContentDescription("다시 시작").assertExists()
+        // The game must fill the area under the top bar. Sized to its content (WRAP_CONTENT), the
+        // page sees a 0px-high screen on phones. (Robolectric doesn't lay out WebViews, so check
+        // the size request rather than the measured size.)
+        compose.waitForIdle()
+        val params = findWebView(compose.activity.window.decorView)!!.layoutParams
+        assertEquals(android.view.ViewGroup.LayoutParams.MATCH_PARENT, params.width)
+        assertEquals(android.view.ViewGroup.LayoutParams.MATCH_PARENT, params.height)
         Espresso.pressBack()
         compose.waitForIdle()
         compose.onNodeWithText("가족 게임").assertExists()
+    }
+
+    private fun findWebView(view: android.view.View): android.webkit.WebView? = when (view) {
+        is android.webkit.WebView -> view
+        is android.view.ViewGroup -> (0 until view.childCount).firstNotNullOfOrNull { findWebView(view.getChildAt(it)) }
+        else -> null
     }
 }
