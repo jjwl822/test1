@@ -38,8 +38,9 @@ const SCHEMA = {
 };
 
 function prompt(text, today) {
-  const day = `${localDate(today)}(${WEEKDAYS[today.getDay()]})`;
-  return `오늘은 ${day}입니다. 아래는 엄마가 가족 단체방에 붙여넣은 아이의 학원·학교 공지나 숙제 메모입니다.
+  const time = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
+  const day = `${localDate(today)}(${WEEKDAYS[today.getDay()]}) ${time}`;
+  return `지금은 ${day}입니다. 새벽이라도 "오늘"은 이 날짜예요. 아래는 엄마가 가족 단체방에 붙여넣은 아이의 학원·학교 공지나 숙제 메모입니다.
 아이가 실제로 해야 할 일(숙제, 시험 준비, 제출, 챙겨 갈 준비물)만 항목으로 뽑으세요.
 - 항목마다 한 가지 일만, 짧은 한국어로 (40자 안팎).
 - 단순 안내, 상품·행사 소식, 선생님 인사는 빼세요.
