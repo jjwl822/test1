@@ -75,17 +75,22 @@ private val LISTS = listOf(
 
 private const val HOMEWORK = "homework"
 
+/** The 숙제 tab: the homework list on its own. */
+@Composable
+fun HomeworkScreen(app: FamilyApp) = ListsScreen(app, keys = listOf(HOMEWORK), title = "📚 숙제")
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ListsScreen(app: FamilyApp) {
-    val viewModel: ListsViewModel = viewModel { ListsViewModel(app) }
+fun ListsScreen(app: FamilyApp, keys: List<String> = listOf("shopping", "todo"), title: String = "함께 쓰는 목록") {
+    val lists = LISTS.filter { it.key in keys }
+    val viewModel: ListsViewModel = viewModel(key = keys.joinToString()) { ListsViewModel(app) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var draft by rememberSaveable { mutableStateOf("") }
     var due by rememberSaveable { mutableStateOf<String?>(null) }
     var pickDue by remember { mutableStateOf(false) }
     var source by remember { mutableStateOf<ListItem?>(null) }
-    val list = LISTS[tab]
+    val list = lists.getOrElse(tab) { lists.first() }
     val homework = list.key == HOMEWORK
     // Homework: soonest due first among the unfinished ones.
     val items = state.items.filter { it.list == list.key }.sortedWith(
@@ -102,9 +107,9 @@ fun ListsScreen(app: FamilyApp) {
         due = null
     }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("함께 쓰는 목록", style = MaterialTheme.typography.titleLarge) }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text(title, style = MaterialTheme.typography.titleLarge) }) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            SecondaryTabRow(
+            if (lists.size > 1) SecondaryTabRow(
                 selectedTabIndex = tab,
                 indicator = {
                     TabRowDefaults.SecondaryIndicator(
@@ -113,7 +118,7 @@ fun ListsScreen(app: FamilyApp) {
                     )
                 },
             ) {
-                LISTS.forEachIndexed { i, l ->
+                lists.forEachIndexed { i, l ->
                     val open = state.items.count { it.list == l.key && !it.done }
                     Tab(
                         selected = tab == i,

@@ -5,7 +5,7 @@ import { ChatList, ChatRoom } from './chat.js';
 import { CallScreen, resumePendingCall } from './call.js';
 import { CalendarScreen } from './calendar.js';
 import { GamePlayer, GamesScreen } from './games.js';
-import { ListsScreen } from './lists.js';
+import { HomeworkScreen, ListsScreen } from './lists.js';
 import { LoginScreen } from './login.js';
 import { ProfileScreen } from './profile.js';
 import { StoryScreen } from './story.js';
@@ -50,6 +50,7 @@ const TABS = [
   { route: 'story', label: '스토리', icon: 'grid' },
   { route: 'calendar', label: '일정', icon: 'calendar' },
   { route: 'lists', label: '목록', icon: 'list' },
+  { route: 'homework', label: '숙제', icon: 'book' },
   { route: 'games', label: '게임', icon: 'game' },
 ];
 
@@ -127,7 +128,7 @@ function App() {
         const group = m.conversationId === 'family';
         toast(group ? '우리 가족' : m.senderName, `${group ? `${m.senderName}: ` : ''}${preview(m)}`, () => go(`/chat/${m.conversationId}`));
       } else if (type === 'reminder') {
-        toast(data.title, data.text, () => go({ feed: '/story', lists: '/lists' }[data.target] ?? '/calendar'));
+        toast(data.title, data.text, () => go({ feed: '/story', lists: '/lists', homework: '/homework' }[data.target] ?? '/calendar'));
       } else if (type === 'post' && data.authorId !== me.id && here.name !== 'story') {
         toast('가족 스토리', `${data.authorName}님이 새 스토리를 올렸어요`, () => go('/story'));
       }
@@ -175,6 +176,9 @@ function App() {
       break;
     case 'lists':
       screen = html`<${ListsScreen} />`;
+      break;
+    case 'homework':
+      screen = html`<${HomeworkScreen} />`;
       break;
     default:
       tab = 'chats';

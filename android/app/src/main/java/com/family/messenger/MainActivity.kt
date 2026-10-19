@@ -22,11 +22,13 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.HorizontalDivider
@@ -63,6 +65,7 @@ import com.family.messenger.ui.FamilyTheme
 import com.family.messenger.ui.FeedScreen
 import com.family.messenger.ui.GamePlayer
 import com.family.messenger.ui.GamesScreen
+import com.family.messenger.ui.HomeworkScreen
 import com.family.messenger.ui.ListsScreen
 import com.family.messenger.ui.LoginScreen
 import com.family.messenger.ui.UnreadBadge
@@ -141,6 +144,10 @@ private fun App(app: FamilyApp, pendingChat: MutableStateFlow<Pair<String, Strin
                     chatId = null
                     tab = TAB_LISTS
                 }
+                MessageBus.HOMEWORK -> {
+                    chatId = null
+                    tab = TAB_HOMEWORK
+                }
                 else -> {
                     chatId = target.first
                     chatTitle = target.second
@@ -187,7 +194,8 @@ private const val TAB_CHATS = 0
 private const val TAB_STORY = 1
 private const val TAB_CALENDAR = 2
 private const val TAB_LISTS = 3
-private const val TAB_GAMES = 4
+private const val TAB_HOMEWORK = 4
+private const val TAB_GAMES = 5
 
 private data class TabSpec(val label: String, val selected: ImageVector, val unselected: ImageVector)
 
@@ -196,6 +204,7 @@ private val TABS = listOf(
     TabSpec("스토리", Icons.Filled.PhotoLibrary, Icons.Outlined.PhotoLibrary),
     TabSpec("일정", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
     TabSpec("목록", Icons.Filled.Checklist, Icons.Outlined.Checklist),
+    TabSpec("숙제", Icons.Filled.School, Icons.Outlined.School),
     TabSpec("게임", Icons.Filled.SportsEsports, Icons.Outlined.SportsEsports),
 )
 
@@ -257,6 +266,7 @@ private fun Home(
                 TAB_STORY -> FeedScreen(app, me)
                 TAB_CALENDAR -> CalendarScreen(app)
                 TAB_LISTS -> ListsScreen(app)
+                TAB_HOMEWORK -> HomeworkScreen(app)
                 TAB_GAMES -> GamesScreen(app, onPlay = onPlay)
                 else -> ConversationsScreen(app, me = me, viewModel = conversations, onOpen = onOpenChat)
             }

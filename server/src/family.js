@@ -117,7 +117,7 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
       const when = h.due === day ? '오늘' : '내일';
       reminders.push({
         key: `homework:${h.id}:${h.due}:${when}`,
-        target: 'lists',
+        target: 'homework',
         title: `📚 ${when}까지 할 숙제`,
         text: h.text,
         userIds: [h.assignee_id ?? h.author_id],
@@ -144,7 +144,7 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
       if (wasSent.get(key)) continue;
       markSent.run(key, Date.now());
       sendTo(userId, { type: 'reminder', target: r.target, title: r.title, text: r.text });
-      notify([userId], { title: r.title, body: r.text, url: { feed: '/#/story', lists: '/#/lists' }[r.target] ?? '/#/calendar', tag: r.key });
+      notify([userId], { title: r.title, body: r.text, url: { feed: '/#/story', lists: '/#/lists', homework: '/#/homework' }[r.target] ?? '/#/calendar', tag: r.key });
     }
   }
 

@@ -32,4 +32,5 @@ object MessageBus {
     const val FEED = "feed"
     const val CALENDAR = "calendar"
     const val LISTS = "lists"
+    const val HOMEWORK = "homework"
 }

@@ -46,14 +46,18 @@ function SourceDialog({ item, onClose }) {
   <//>`;
 }
 
-export function ListsScreen() {
+/** The 📚 숙제 tab: the homework list on its own. */
+export const HomeworkScreen = () => ListsScreen({ keys: ['homework'], title: '📚 숙제' });
+
+export function ListsScreen({ keys = ['shopping', 'todo'], title = '함께 쓰는 목록' } = {}) {
+  const lists = LISTS.filter((l) => keys.includes(l.key));
   const [items, setItems] = useState(null);
   const [tab, setTab] = useState(0);
   const [draft, setDraft] = useState('');
   const [due, setDue] = useState('');
   const [source, setSource] = useState(null);
   const [error, setError] = useState(null);
-  const list = LISTS[tab];
+  const list = lists[tab] ?? lists[0];
   const homework = list.key === 'homework';
 
   const load = () => api.listItems().then((i) => { setItems(i); setError(null); }).catch((e) => setError(e.message));
@@ -90,13 +94,14 @@ export function ListsScreen() {
     return `${who}${i.authorName} ${i.fromChat ? '단체방에서' : '추가'} · ${ago(i.createdAt)}`;
   }
 
-  return html`<${TopBar} title="함께 쓰는 목록" />
-    <div class="tabs">
-      ${LISTS.map((l, i) => {
+  return html`<${TopBar} title=${title} />
+    ${lists.length > 1 &&
+    html`<div class="tabs">
+      ${lists.map((l, i) => {
         const open = (items ?? []).filter((x) => x.list === l.key && !x.done).length;
         return html`<button class=${tab === i ? 'on' : ''} onClick=${() => setTab(i)}>${l.title}${open > 0 ? ` ${open}` : ''}</button>`;
       })}
-    </div>
+    </div>`}
     <div class="row" style="padding:12px">
       <input
         class="pill-input"

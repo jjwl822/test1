@@ -228,7 +228,7 @@ export function createHomework({ db, authors, assignee, extract, now, listsChang
     const lines = added.map((i) => `• ${i.text}${i.due ? ` (~${Number(i.due.slice(5, 7))}/${Number(i.due.slice(8))})` : ''}`);
     logMessage(authorId, `📚 숙제 ${added.length}개를 목록에 넣었어요${fallback ? ' (원문 그대로)' : ''}\n${lines.join('\n')}`);
     if (assigneeId) {
-      notify([assigneeId], { title: `📚 새 숙제 ${added.length}개`, body: added.map((i) => i.text).join(', '), url: '/#/lists', tag: `homework-${job}` });
+      notify([assigneeId], { title: `📚 새 숙제 ${added.length}개`, body: added.map((i) => i.text).join(', '), url: '/#/homework', tag: `homework-${job}` });
     }
     return added;
   }

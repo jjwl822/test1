@@ -130,6 +130,7 @@ class MessageService : Service() {
                     when (event.target) {
                         "feed" -> MessageBus.FEED
                         "lists" -> MessageBus.LISTS
+                        "homework" -> MessageBus.HOMEWORK
                         else -> MessageBus.CALENDAR
                     },
                 )
