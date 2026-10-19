@@ -1,3 +1,4 @@
+import { localModifier } from './tz.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
@@ -87,11 +88,11 @@ export function registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uplo
     const rows = db
       .prepare(
         `${POST_SELECT}
-         WHERE strftime('%m-%d', p.created_at / 1000, 'unixepoch', 'localtime') = ?
-           AND strftime('%Y', p.created_at / 1000, 'unixepoch', 'localtime') < ?
+         WHERE strftime('%m-%d', p.created_at / 1000, 'unixepoch', ?) = ?
+           AND strftime('%Y', p.created_at / 1000, 'unixepoch', ?) < ?
          ORDER BY p.id DESC`,
       )
-      .all(monthDay, String(today.getFullYear()));
+      .all(localModifier(), monthDay, localModifier(), String(today.getFullYear()));
     res.json(rows.map((r) => toPost(r, req.user.id)));
   });
 

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
+import './tz.js';
 import { createServer } from './app.js';
 import { claudeExtractor } from './homework.js';
 

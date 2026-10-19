@@ -1,3 +1,4 @@
+import { localModifier } from './tz.js';
 import { homeworkPeople } from './homework.js';
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -92,8 +93,8 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
 
   const memoryCount = db.prepare(`
     SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM posts
-    WHERE strftime('%m-%d', created_at / 1000, 'unixepoch', 'localtime') = ?
-      AND strftime('%Y', created_at / 1000, 'unixepoch', 'localtime') < ?`);
+    WHERE strftime('%m-%d', created_at / 1000, 'unixepoch', ?) = ?
+      AND strftime('%Y', created_at / 1000, 'unixepoch', ?) < ?`);
   const homeworkDue = db.prepare(
     "SELECT id, text, due, assignee_id, author_id FROM list_items WHERE list = 'homework' AND done = 0 AND due IN (?, ?)",
   );
@@ -124,7 +125,7 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
         userIds: [h.assignee_id ?? h.author_id],
       });
     }
-    const memories = memoryCount.get(day.slice(5), day.slice(0, 4));
+    const memories = memoryCount.get(localModifier(), day.slice(5), localModifier(), day.slice(0, 4));
     if (memories.n > 0) {
       const years = today.getFullYear() - new Date(memories.oldest).getFullYear();
       reminders.push({

@@ -163,7 +163,7 @@ fun ListsScreen(app: FamilyApp, keys: List<String> = listOf("shopping", "todo"),
             }
             if (homework) {
                 Text(
-                    "대화방에 📢 공지를 올리거나, 공지 뒤에 \"유이숙제\"·\"유호숙제\"라고 보내면 자동으로 들어와요.",
+                    "엄마·아빠가 어느 대화방에서든 \"숙제\"라는 말과 함께 쓰면(예: 유호숙제 내일 영어시험) 자동으로 들어와요.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),

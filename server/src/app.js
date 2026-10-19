@@ -444,6 +444,7 @@ export function createServer({
     clearInterval(heartbeat);
     app.locals.stopCleanup?.();
     family.stop();
+    homeworkBot?.stop();
     calls.stop();
     for (const ws of wss.clients) ws.terminate();
     db.close();
