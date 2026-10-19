@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ko">
+<head><script src="/games/wv-fix.js?v=3"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>색깔 맞추기</title>
+  <style>
+    :root { --bg: #f7f7fb; --fg: #222; --muted: #7a7a8c; --card: #fff; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #131318; --fg: #eeeef4; --muted: #9a9aae; --card: #22222b; } }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overscroll-behavior: none; touch-action: manipulation;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; user-select: none; -webkit-user-select: none; }
+    main { max-width: 480px; height: 100%; margin: 0 auto; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); display: flex; flex-direction: column; gap: 14px; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 22px; margin: 0; }
+    .stats { display: flex; gap: 14px; color: var(--muted); }
+    .stats b { color: var(--fg); font-size: 20px; font-variant-numeric: tabular-nums; }
+    .bar { height: 8px; border-radius: 4px; background: rgba(0,0,0,.1); overflow: hidden; }
+    .bar i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #34c759, #ffcc00, #ff3b30); }
+    .q { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+      background: var(--card); border-radius: 22px; box-shadow: 0 2px 10px rgba(0,0,0,.06); }
+    .q small { color: var(--muted); font-size: 16px; }
+    .word { font-size: clamp(64px, 24vw, 110px); font-weight: 900; letter-spacing: 4px; }
+    .q.wrong { animation: shake .3s; }
+    @keyframes shake { 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
+    .answers { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .answers button { border: 0; border-radius: 16px; padding: 22px 0; font-size: 24px; font-weight: 800; color: var(--fg);
+      background: var(--card); box-shadow: 0 2px 8px rgba(0,0,0,.08); font-family: inherit; }
+    .answers button:active { transform: scale(.97); }
+    .penalty { color: #ff3b30; font-weight: 800; min-height: 20px; text-align: center; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>🎨 색깔 맞추기</h1>
+      <div class="stats"><span>맞힘 <b id="score">0</b></span><span><b id="left">30</b>초</span></div>
+    </header>
+    <div class="bar"><i id="bar"></i></div>
+    <div class="q" id="q"><small>글자의 <b>색깔</b>을 고르세요</small><div class="word" id="word">빨강</div></div>
+    <div class="penalty" id="penalty"></div>
+    <div class="answers" id="answers"></div>
+  </main>
+
+  <script src="/games/family-games.js"></script>
+  <script>
+    const SECONDS = 30, PENALTY = 2;
+    const COLORS = [
+      { name: '빨강', css: '#ff3b30' },
+      { name: '파랑', css: '#007aff' },
+      { name: '초록', css: '#28b14c' },
+      { name: '노랑', css: '#f2b600' },
+      { name: '보라', css: '#a64fd6' },
+    ];
+    const pick = (list) => list[Math.floor(Math.random() * list.length)];
+    const shuffle = (list) => {
+      for (let i = list.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [list[i], list[j]] = [list[j], list[i]];
+      }
+      return list;
+    };
+    let ink, score = 0, endAt = 0, running = false, tick = null;
+
+    function next() {
+      ink = pick(COLORS);
+      // Usually the word names a different color than it's painted in.
+      const word = Math.random() < 0.8 ? pick(COLORS.filter((c) => c !== ink)) : ink;
+      const el = document.getElementById('word');
+      el.textContent = word.name;
+      el.style.color = ink.css;
+      const options = shuffle([...new Set([ink, word, ...shuffle([...COLORS])])].slice(0, 4));
+      const answers = document.getElementById('answers');
+      answers.innerHTML = '';
+      for (const c of options) {
+        const b = document.createElement('button');
+        b.textContent = c.name;
+        b.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          answer(c);
+        });
+        answers.appendChild(b);
+      }
+    }
+
+    function answer(c) {
+      if (!running) return;
+      if (c === ink) {
+        score++;
+        document.getElementById('score').textContent = score;
+        navigator.vibrate?.(8);
+      } else {
+        endAt -= PENALTY * 1000;
+        const q = document.getElementById('q');
+        q.classList.remove('wrong');
+        void q.offsetWidth;
+        q.classList.add('wrong');
+        const p = document.getElementById('penalty');
+        p.textContent = `땡! -${PENALTY}초`;
+        setTimeout(() => (p.textContent = ''), 700);
+        navigator.vibrate?.(60);
+      }
+      next();
+    }
+
+    function start() {
+      score = 0;
+      document.getElementById('score').textContent = '0';
+      endAt = Date.now() + SECONDS * 1000;
+      running = true;
+      next();
+      clearInterval(tick);
+      tick = setInterval(() => {
+        const left = Math.max(0, endAt - Date.now());
+        document.getElementById('left').textContent = Math.ceil(left / 1000);
+        document.getElementById('bar').style.width = `${(left / (SECONDS * 1000)) * 100}%`;
+        if (left === 0) finish();
+      }, 100);
+    }
+
+    function finish() {
+      running = false;
+      clearInterval(tick);
+      FamilyGames.finish(score, `${score}개 맞혔어요! 🎨`);
+    }
+
+    FamilyGames.setup({
+      title: '색깔 맞추기', emoji: '🎨',
+      howTo: `글자가 아니라 글자의 "색깔"을 골라요.\n예) 파란색으로 쓴 "빨강" → 파랑\n${SECONDS}초 동안 많이 맞히면 1등! 틀리면 ${PENALTY}초가 줄어요.`,
+      onStart: start,
+    });
+  </script>
+</body>
+</html>

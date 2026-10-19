@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ko">
+<head><script src="/games/wv-fix.js?v=3"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>다른 그림 찾기</title>
+  <style>
+    :root { --bg: #fffaf0; --fg: #2b2b2b; --muted: #8a8273; --card: #fff; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #17140f; --fg: #f4f0ea; --muted: #a39b91; --card: #26221c; } }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overscroll-behavior: none; touch-action: manipulation;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; user-select: none; -webkit-user-select: none; }
+    main { max-width: 480px; height: 100%; margin: 0 auto; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); display: flex; flex-direction: column; gap: 14px; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 22px; margin: 0; }
+    .stats { display: flex; gap: 14px; color: var(--muted); }
+    .stats b { color: var(--fg); font-size: 20px; font-variant-numeric: tabular-nums; }
+    .bar { height: 8px; border-radius: 4px; background: rgba(0,0,0,.1); overflow: hidden; }
+    .bar i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #34c759, #ffcc00, #ff3b30); }
+    .board { display: grid; gap: 6px; background: var(--card); padding: 8px; border-radius: 18px; aspect-ratio: 1; box-shadow: 0 2px 10px rgba(0,0,0,.06); }
+    .board.wrong { animation: shake .3s; }
+    @keyframes shake { 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
+    .board button { min-width: 0; min-height: 0; border: 0; background: none; padding: 0; display: grid; place-items: center; line-height: 1; border-radius: 10px; }
+    .board button:active { background: rgba(128,128,128,.15); }
+    .board button.found { background: rgba(52,199,89,.3); }
+    .msg { text-align: center; color: var(--muted); min-height: 22px; font-weight: 700; }
+    .msg.bad { color: #ff3b30; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>🔍 다른 그림 찾기</h1>
+      <div class="stats"><span>찾음 <b id="score">0</b></span><span><b id="left">40</b>초</span></div>
+    </header>
+    <div class="bar"><i id="bar"></i></div>
+    <div class="msg" id="msg">하나만 다른 그림을 찾아요</div>
+    <div class="board" id="board"></div>
+  </main>
+
+  <script src="/games/family-games.js"></script>
+  <script>
+    const SECONDS = 40, PENALTY = 3;
+    // Pairs that look alike; one of each pair hides among the other.
+    const PAIRS = [
+      ['😀', '😃'], ['😊', '☺️'], ['🙂', '🙃'], ['😐', '😑'], ['🐶', '🐕'], ['🐱', '🐈'], ['🍎', '🍅'],
+      ['🍊', '🍑'], ['⭐', '🌟'], ['🌕', '🌝'], ['🌲', '🌳'], ['🚗', '🚙'], ['🐻', '🐨'], ['🌸', '💮'],
+      ['🍋', '🍌'], ['🐥', '🐤'], ['❤️', '🧡'], ['💙', '💜'], ['🍪', '🥯'], ['🐰', '🐇'], ['🐭', '🐹'],
+      ['☁️', '🌥️'], ['🎈', '🎀'], ['🌍', '🌏'],
+    ];
+    const board = document.getElementById('board');
+    let score = 0, endAt = 0, running = false, tick = null, lastPair = -1;
+
+    function level() {
+      const size = Math.min(7, 3 + Math.floor(score / 3));
+      let p;
+      do p = Math.floor(Math.random() * PAIRS.length);
+      while (p === lastPair);
+      lastPair = p;
+      const [same, odd] = Math.random() < 0.5 ? PAIRS[p] : [...PAIRS[p]].reverse();
+      const answer = Math.floor(Math.random() * size * size);
+      board.style.gridTemplateColumns = `repeat(${size}, 1fr)`;
+      board.style.gridTemplateRows = `repeat(${size}, 1fr)`;
+      board.innerHTML = '';
+      const fontSize = `${Math.floor(Math.min(board.clientWidth, 460) / size * 0.62)}px`;
+      for (let i = 0; i < size * size; i++) {
+        const b = document.createElement('button');
+        b.textContent = i === answer ? odd : same;
+        b.style.fontSize = fontSize;
+        b.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          pickCell(b, i === answer);
+        });
+        board.appendChild(b);
+      }
+    }
+
+    function pickCell(b, right) {
+      if (!running) return;
+      const msg = document.getElementById('msg');
+      if (right) {
+        score++;
+        document.getElementById('score').textContent = score;
+        b.classList.add('found');
+        msg.className = 'msg';
+        msg.textContent = ['찾았다! 👀', '대단해요! ✨', '눈이 좋아요! 👍'][score % 3];
+        navigator.vibrate?.(10);
+        running = false;
+        setTimeout(() => {
+          if (endAt > Date.now()) {
+            running = true;
+            level();
+          }
+        }, 250);
+      } else {
+        endAt -= PENALTY * 1000;
+        board.classList.remove('wrong');
+        void board.offsetWidth;
+        board.classList.add('wrong');
+        msg.className = 'msg bad';
+        msg.textContent = `아니에요! -${PENALTY}초`;
+        navigator.vibrate?.(60);
+      }
+    }
+
+    function start() {
+      score = 0;
+      document.getElementById('score').textContent = '0';
+      document.getElementById('msg').className = 'msg';
+      document.getElementById('msg').textContent = '하나만 다른 그림을 찾아요';
+      endAt = Date.now() + SECONDS * 1000;
+      running = true;
+      level();
+      clearInterval(tick);
+      tick = setInterval(() => {
+        const left = Math.max(0, endAt - Date.now());
+        document.getElementById('left').textContent = Math.ceil(left / 1000);
+        document.getElementById('bar').style.width = `${(left / (SECONDS * 1000)) * 100}%`;
+        if (left === 0) finish();
+      }, 100);
+    }
+
+    function finish() {
+      running = false;
+      clearInterval(tick);
+      FamilyGames.finish(score, `${score}개 찾았어요! 🔍`);
+    }
+
+    FamilyGames.setup({
+      title: '다른 그림 찾기', emoji: '🔍',
+      howTo: `똑같은 그림 사이에 하나만 다른 그림이 숨어 있어요.\n${SECONDS}초 동안 많이 찾으면 1등! 갈수록 칸이 많아져요.\n잘못 누르면 ${PENALTY}초가 줄어요.`,
+      onStart: start,
+    });
+  </script>
+</body>
+</html>

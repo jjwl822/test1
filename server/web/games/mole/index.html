@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ko">
-<head>
+<head><script src="/games/wv-fix.js?v=3"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <title>두더지 잡기</title>
@@ -25,16 +25,6 @@
     .hole.hit .mole { filter: grayscale(1) brightness(1.4); transform: translateX(-50%) scale(.85); }
     .pop { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); color: #fff; font-weight: 800; font-size: 20px; animation: up .5s forwards; pointer-events: none; }
     @keyframes up { to { transform: translate(-50%, -20px); opacity: 0; } }
-    button.primary { background: var(--accent); color: #fff; border: 0; border-radius: 10px; padding: 12px; font-size: 16px; font-weight: 700; width: 100%; }
-    button.primary:disabled { opacity: .35; }
-    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; padding: 20px; }
-    .overlay.show { display: flex; }
-    .panel { background: var(--bg); border-radius: 16px; padding: 20px; width: 100%; max-width: 360px; text-align: center; }
-    .panel h2 { margin: 0 0 4px; font-size: 24px; }
-    .panel p { margin: 0 0 14px; color: var(--muted); }
-    .record { color: #ff3040; font-weight: 700; }
-    .board-title { font-weight: 700; margin: 4px 0; text-align: left; }
-    #rank { margin-bottom: 14px; max-height: 40vh; overflow: auto; }
   </style>
 </head>
 <body>
@@ -45,18 +35,7 @@
     </header>
     <div class="bar"><i id="bar"></i></div>
     <div class="field" id="field"></div>
-    <button class="primary" id="start">시작!</button>
   </main>
-
-  <div class="overlay" id="overlay">
-    <div class="panel">
-      <h2>⏰ 끝!</h2>
-      <p id="summary"></p>
-      <div class="board-title">👨‍👩‍👧 우리 가족 순위</div>
-      <div id="rank">불러오는 중…</div>
-      <button class="primary" id="again">한 번 더</button>
-    </div>
-  </div>
 
   <script src="/games/family-games.js"></script>
   <script>
@@ -105,8 +84,6 @@
     function start() {
       score = 0;
       document.getElementById('score').textContent = '0';
-      document.getElementById('overlay').classList.remove('show');
-      document.getElementById('start').disabled = true;
       endAt = Date.now() + SECONDS * 1000;
       running = true;
       tick = setInterval(() => {
@@ -118,26 +95,15 @@
       popUp();
     }
 
-    async function finish() {
+    function finish() {
       running = false;
       clearInterval(tick);
       clearTimeout(spawn);
       holes.forEach((h) => h.classList.remove('up', 'hit'));
-      document.getElementById('start').disabled = false;
-      document.getElementById('summary').textContent = `두더지 ${score}마리를 잡았어요!`;
-      document.getElementById('overlay').classList.add('show');
-      const rank = document.getElementById('rank');
-      const result = await FamilyGames.submitScore(score);
-      if (!result) {
-        rank.textContent = '순위를 불러올 수 없어요.';
-        return;
-      }
-      if (result.record) document.getElementById('summary').innerHTML += '<br><span class="record">🏆 내 최고 기록!</span>';
-      FamilyGames.renderLeaderboard(rank, result);
+      FamilyGames.finish(score, `두더지 ${score}마리를 잡았어요!`);
     }
 
-    document.getElementById('start').addEventListener('click', start);
-    document.getElementById('again').addEventListener('click', start);
+    FamilyGames.setup({ title: '두더지 잡기', emoji: '🐹', howTo: `${SECONDS}초 동안 올라오는 두더지를 톡톡 잡아요.\n갈수록 빨라져요!`, onStart: start });
   </script>
 </body>
 </html>

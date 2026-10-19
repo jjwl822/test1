@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ko">
+<head><script src="/games/wv-fix.js?v=3"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>과일 받기</title>
+  <style>
+    :root { --bg: #fff7ec; --fg: #2b2b2b; --muted: #8a7f70; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #17130e; --fg: #f4f0ea; --muted: #a39b91; } }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overscroll-behavior: none; touch-action: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; user-select: none; -webkit-user-select: none; }
+    main { max-width: 480px; height: 100%; margin: 0 auto; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); display: flex; flex-direction: column; gap: 12px; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 22px; margin: 0; }
+    .stats { display: flex; gap: 14px; color: var(--muted); align-items: center; }
+    .stats b { color: var(--fg); font-size: 20px; font-variant-numeric: tabular-nums; }
+    .wrap { flex: 1; position: relative; border-radius: 20px; overflow: hidden; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>🍎 과일 받기</h1>
+      <div class="stats"><span id="lives">❤️❤️❤️</span><span>받은 <b id="score">0</b></span></div>
+    </header>
+    <div class="wrap" id="wrap"><canvas id="canvas"></canvas></div>
+  </main>
+
+  <script src="/games/family-games.js"></script>
+  <script>
+    const FRUITS = ['🍎', '🍌', '🍇', '🍓', '🍉', '🍑', '🍊', '🍒'];
+    const LIVES = 3, SIZE = 38;
+    const wrap = document.getElementById('wrap');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let W = 0, H = 0, basketX = 0, items = [], pops = [], score = 0, lives = LIVES, state = 'idle', last = 0, nextAt = 0, hurtUntil = 0;
+
+    function fit() {
+      const dpr = window.devicePixelRatio || 1;
+      const r = wrap.getBoundingClientRect();
+      W = r.width;
+      H = r.height;
+      canvas.width = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function aim(e) {
+      const r = wrap.getBoundingClientRect();
+      basketX = Math.max(30, Math.min(W - 30, e.clientX - r.left));
+    }
+    // Fingers via touch events (same on iPhone Safari and the Android app), the mouse via pointer events.
+    for (const type of ['touchstart', 'touchmove']) {
+      wrap.addEventListener(type, (e) => {
+        e.preventDefault();
+        aim(e.touches[0] ?? e.changedTouches[0]);
+      }, { passive: false });
+    }
+    wrap.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'mouse') aim(e);
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') basketX = Math.max(30, basketX - 30);
+      if (e.key === 'ArrowRight') basketX = Math.min(W - 30, basketX + 30);
+    });
+
+    const level = () => Math.min(score, 60);
+
+    function spawn() {
+      const bomb = score > 3 && Math.random() < 0.18 + level() * 0.002;
+      items.push({
+        x: 24 + Math.random() * (W - 48),
+        y: -SIZE,
+        vy: H * (0.32 + level() * 0.012) * (0.85 + Math.random() * 0.3),
+        e: bomb ? '💣' : FRUITS[Math.floor(Math.random() * FRUITS.length)],
+        bomb,
+        spin: (Math.random() - 0.5) * 3,
+        a: 0,
+      });
+    }
+
+    function hurt(now) {
+      lives--;
+      hurtUntil = now + 300;
+      document.getElementById('lives').textContent = '❤️'.repeat(Math.max(0, lives)) + '🤍'.repeat(LIVES - Math.max(0, lives));
+      navigator.vibrate?.(80);
+      if (lives <= 0) {
+        state = 'done';
+        setTimeout(() => FamilyGames.finish(score, `과일 ${score}개를 받았어요! 🧺`), 500);
+      }
+    }
+
+    function frame(now) {
+      if (state !== 'play') return;
+      const dt = Math.min(0.033, (now - last) / 1000);
+      last = now;
+      if (now >= nextAt) {
+        spawn();
+        nextAt = now + Math.max(330, 950 - level() * 12);
+      }
+      const basketY = H - 46;
+      for (const it of items) {
+        it.y += it.vy * dt;
+        it.a += it.spin * dt;
+        if (!it.gone && it.y > basketY - 14 && it.y < basketY + 18 && Math.abs(it.x - basketX) < 42) {
+          it.gone = true;
+          if (it.bomb) {
+            pops.push({ x: it.x, y: basketY - 20, t: now, text: '💥' });
+            hurt(now);
+          } else {
+            score++;
+            document.getElementById('score').textContent = score;
+            pops.push({ x: it.x, y: basketY - 20, t: now, text: '+1' });
+            navigator.vibrate?.(8);
+          }
+        } else if (!it.gone && it.y > H + SIZE) {
+          it.gone = true;
+          if (!it.bomb) hurt(now);
+        }
+        if (state !== 'play') break;
+      }
+      items = items.filter((it) => !it.gone);
+      pops = pops.filter((p) => now - p.t < 500);
+      draw(now);
+      requestAnimationFrame(frame);
+    }
+
+    function draw(now = performance.now()) {
+      const sky = ctx.createLinearGradient(0, 0, 0, H);
+      sky.addColorStop(0, now < hurtUntil ? '#ffb3b3' : '#bfe8ff');
+      sky.addColorStop(1, '#f6fbff');
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#8fd16a';
+      ctx.fillRect(0, H - 18, W, 18);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `${SIZE}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+      for (const it of items) {
+        ctx.save();
+        ctx.translate(it.x, it.y);
+        ctx.rotate(it.a);
+        ctx.fillText(it.e, 0, 0);
+        ctx.restore();
+      }
+      ctx.font = '56px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+      ctx.fillText('🧺', basketX, H - 46);
+      for (const p of pops) {
+        const k = (now - p.t) / 500;
+        ctx.globalAlpha = 1 - k;
+        ctx.font = 'bold 22px -apple-system, "Apple SD Gothic Neo", sans-serif';
+        ctx.fillStyle = '#ff3040';
+        ctx.fillText(p.text, p.x, p.y - k * 30);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    function start() {
+      fit();
+      basketX = W / 2;
+      items = [];
+      pops = [];
+      score = 0;
+      lives = LIVES;
+      document.getElementById('score').textContent = '0';
+      document.getElementById('lives').textContent = '❤️'.repeat(LIVES);
+      state = 'play';
+      last = performance.now();
+      nextAt = last + 400;
+      requestAnimationFrame(frame);
+    }
+
+    window.addEventListener('resize', () => {
+      fit();
+      if (state !== 'play') draw();
+    });
+
+    fit();
+    basketX = W / 2;
+    draw();
+    FamilyGames.setup({
+      title: '과일 받기', emoji: '🍎',
+      howTo: '화면을 누른 채 좌우로 움직여 바구니로 과일을 받아요.\n💣 폭탄을 받거나 과일을 놓치면 ❤️가 줄어요.\n하트 3개가 모두 없어지면 끝!',
+      onStart: start,
+    });
+  </script>
+</body>
+</html>

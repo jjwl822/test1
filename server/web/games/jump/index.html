@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ko">
+<head><script src="/games/wv-fix.js?v=3"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>점프 점프</title>
+  <style>
+    :root { --bg: #eaf6ff; --fg: #222; --muted: #6f8294; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #0f1722; --fg: #eef2f8; --muted: #93a0b4; } }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overscroll-behavior: none; touch-action: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; user-select: none; -webkit-user-select: none; }
+    main { max-width: 480px; height: 100%; margin: 0 auto; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); display: flex; flex-direction: column; gap: 12px; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 22px; margin: 0; }
+    .stats { display: flex; gap: 14px; color: var(--muted); }
+    .stats b { color: var(--fg); font-size: 20px; font-variant-numeric: tabular-nums; }
+    .wrap { flex: 1; position: relative; border-radius: 20px; overflow: hidden; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>🐤 점프 점프</h1>
+      <div class="stats"><span>통과 <b id="score">0</b></span></div>
+    </header>
+    <div class="wrap" id="wrap"><canvas id="canvas"></canvas></div>
+  </main>
+
+  <script src="/games/family-games.js"></script>
+  <script>
+    const wrap = document.getElementById('wrap');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const BIRD_R = 15, PIPE_W = 62;
+    let W = 0, H = 0, state = 'idle', bird, pipes, score, last = 0, deadAt = 0;
+
+    function fit() {
+      const dpr = window.devicePixelRatio || 1;
+      const r = wrap.getBoundingClientRect();
+      W = r.width;
+      H = r.height;
+      canvas.width = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    window.addEventListener('resize', () => {
+      fit();
+      if (state !== 'play') draw();
+    });
+
+    const gap = () => H * Math.max(0.24, 0.32 - score * 0.003);
+    const speed = () => W * 0.42 + Math.min(score, 40) * 2.5;
+
+    function addPipe() {
+      const g = gap();
+      const top = H * 0.1 + Math.random() * (H * 0.8 - g - H * 0.08);
+      pipes.push({ x: W + 10, top, gap: g, passed: false });
+    }
+
+    function flap() {
+      if (state === 'ready') {
+        state = 'play';
+        last = performance.now();
+        requestAnimationFrame(frame);
+      }
+      if (state === 'play') {
+        bird.vy = -H * 0.62;
+        navigator.vibrate?.(8);
+      }
+    }
+    // Fingers via touch events (same on iPhone Safari and the Android app), the mouse via pointer events.
+    wrap.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      flap();
+    }, { passive: false });
+    wrap.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse') flap();
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        flap();
+      }
+    });
+
+    function hits(p) {
+      const groundY = H - 24;
+      if (bird.y + BIRD_R > groundY || bird.y - BIRD_R < 0) return true;
+      if (bird.x + BIRD_R < p.x || bird.x - BIRD_R > p.x + PIPE_W) return false;
+      return bird.y - BIRD_R + 4 < p.top || bird.y + BIRD_R - 4 > p.top + p.gap;
+    }
+
+    function frame(now) {
+      const dt = Math.min(0.033, (now - last) / 1000);
+      last = now;
+      if (state === 'play') {
+        bird.vy += H * 2.4 * dt;
+        bird.y += bird.vy * dt;
+        const v = speed();
+        for (const p of pipes) {
+          p.x -= v * dt;
+          if (!p.passed && p.x + PIPE_W < bird.x) {
+            p.passed = true;
+            score++;
+            document.getElementById('score').textContent = score;
+          }
+        }
+        pipes = pipes.filter((p) => p.x + PIPE_W > -10);
+        if (!pipes.length || pipes[pipes.length - 1].x < W - W * 0.58 - PIPE_W) addPipe();
+        if (pipes.some(hits) || bird.y + BIRD_R > H - 24 || bird.y - BIRD_R < 0) {
+          state = 'dead';
+          deadAt = now;
+          navigator.vibrate?.(60);
+        }
+      } else if (state === 'dead') {
+        bird.vy += H * 2.4 * dt;
+        bird.y = Math.min(H - 24 - BIRD_R, bird.y + bird.vy * dt);
+        if (now - deadAt > 700) {
+          state = 'over';
+          draw();
+          FamilyGames.finish(score, score ? `${score}개 통과했어요! 🐤` : '앗, 다음엔 더 멀리! 🐤');
+          return;
+        }
+      }
+      draw(now);
+      if (state === 'play' || state === 'dead') requestAnimationFrame(frame);
+    }
+
+    function draw(now = performance.now()) {
+      const sky = ctx.createLinearGradient(0, 0, 0, H);
+      sky.addColorStop(0, '#7ec8ff');
+      sky.addColorStop(1, '#d9f1ff');
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, W, H);
+      for (const p of pipes) {
+        ctx.fillStyle = '#34c759';
+        ctx.fillRect(p.x, 0, PIPE_W, p.top);
+        ctx.fillRect(p.x, p.top + p.gap, PIPE_W, H - p.top - p.gap);
+        ctx.fillStyle = '#2aa34a';
+        ctx.fillRect(p.x - 4, p.top - 16, PIPE_W + 8, 16);
+        ctx.fillRect(p.x - 4, p.top + p.gap, PIPE_W + 8, 16);
+      }
+      ctx.fillStyle = '#c99b5f';
+      ctx.fillRect(0, H - 24, W, 24);
+      ctx.fillStyle = '#7bc25a';
+      ctx.fillRect(0, H - 24, W, 6);
+
+      const bob = state === 'ready' ? Math.sin(now / 200) * 6 : 0;
+      ctx.save();
+      ctx.translate(bird.x, bird.y + bob);
+      ctx.rotate(Math.max(-0.5, Math.min(1.2, bird.vy / (H * 1.2))));
+      ctx.font = '34px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🐤', 0, 0);
+      ctx.restore();
+
+      if (state === 'ready') {
+        ctx.fillStyle = 'rgba(0,0,0,.55)';
+        ctx.font = 'bold 20px -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('화면을 터치하면 날아올라요!', W / 2, H * 0.32);
+      }
+    }
+
+    function idle(now) {
+      if (state !== 'ready') return;
+      draw(now);
+      requestAnimationFrame(idle);
+    }
+
+    function reset() {
+      fit();
+      bird = { x: W * 0.28, y: H * 0.45, vy: 0 };
+      pipes = [];
+      score = 0;
+      document.getElementById('score').textContent = '0';
+    }
+
+    function start() {
+      reset();
+      state = 'ready';
+      requestAnimationFrame(idle);
+    }
+
+    reset();
+    draw();
+    FamilyGames.setup({
+      title: '점프 점프', emoji: '🐤',
+      howTo: '화면을 터치할 때마다 병아리가 날아올라요.\n초록 기둥 사이를 지나가요. 부딪히면 끝!',
+      onStart: start,
+    });
+  </script>
+</body>
+</html>

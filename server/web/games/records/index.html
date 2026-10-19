@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ko">
+<head><script src="/games/wv-fix.js?v=3"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>가족 기록판</title>
+  <style>
+    :root { --bg: #f5f5f7; --fg: #222; --muted: #7a7a85; --card: #fff; --accent: #0095f6; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #111114; --fg: #eeeef2; --muted: #9a9aa6; --card: #1f1f24; } }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; background: var(--bg); color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+    main { max-width: 520px; margin: 0 auto; padding: 16px 14px calc(env(safe-area-inset-bottom) + 24px); display: flex; flex-direction: column; gap: 14px; }
+    h1 { font-size: 22px; margin: 0; }
+    .muted { color: var(--muted); }
+    .card { background: var(--card); border-radius: 18px; padding: 14px 16px; box-shadow: 0 2px 10px rgba(0,0,0,.05); }
+    .card h2 { font-size: 18px; margin: 0; display: flex; align-items: center; gap: 8px; }
+    .card h2 .grow { flex: 1; }
+    .card h2 small { font-size: 13px; font-weight: 500; }
+    .card .play { border: 0; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 700; padding: 7px 14px; font-size: 14px; text-decoration: none; }
+    .top { list-style: none; margin: 10px 0 0; padding: 0; }
+    .top li { display: flex; gap: 10px; align-items: center; padding: 6px 2px; }
+    .top li.me { font-weight: 700; }
+    .top .rank { width: 26px; text-align: center; font-size: 18px; }
+    .top .name { flex: 1; }
+    .top .score { font-variant-numeric: tabular-nums; }
+    .more { border: 0; background: none; color: var(--accent); font-weight: 600; padding: 8px 0 0; font-size: 14px; }
+    .detail { margin-top: 8px; }
+    .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center; }
+    .summary div { background: rgba(128,128,128,.1); border-radius: 12px; padding: 10px 4px; }
+    .summary b { display: block; font-size: 20px; }
+    .error { color: #ff3b30; text-align: center; padding: 20px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>🏆 가족 기록판</h1>
+    <div id="content" class="muted">불러오는 중…</div>
+  </main>
+
+  <script src="/games/family-games.js"></script>
+  <script>
+    const medal = ['🥇', '🥈', '🥉'];
+    const { fmt, ago } = FamilyGames;
+
+    function el(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text !== undefined) e.textContent = text;
+      return e;
+    }
+
+    /** Who played the most, across every game. */
+    function summary(boards) {
+      const people = new Map();
+      let total = 0, lastAt = 0;
+      for (const b of boards) {
+        for (const r of b.leaderboard) {
+          const p = people.get(r.userId) ?? { name: r.name, plays: 0, wins: 0 };
+          p.plays += r.plays;
+          if (r.rank === 1) p.wins++;
+          people.set(r.userId, p);
+          total += r.plays;
+          lastAt = Math.max(lastAt, r.lastAt ?? 0);
+        }
+      }
+      const card = el('div', 'card');
+      card.appendChild(el('h2', '', '👨‍👩‍👧 우리 가족 게임 현황'));
+      const grid = el('div', 'summary');
+      const most = [...people.values()].sort((a, b) => b.plays - a.plays)[0];
+      const champ = [...people.values()].sort((a, b) => b.wins - a.wins)[0];
+      const stat = (value, label) => {
+        const d = el('div');
+        d.append(el('b', '', value), el('span', 'muted', label));
+        return d;
+      };
+      grid.append(
+        stat(`${total}판`, '함께 한 게임'),
+        stat(most ? most.name : '-', most ? `제일 많이 (${most.plays}판)` : '제일 많이'),
+        stat(champ?.wins ? champ.name : '-', champ?.wins ? `1등 ${champ.wins}개` : '1등 많이'),
+      );
+      grid.style.marginTop = '10px';
+      card.appendChild(grid);
+      if (lastAt) card.appendChild(el('div', 'muted', `마지막 게임: ${ago(lastAt)}`)).style.cssText = 'font-size:13px;margin-top:8px;text-align:right';
+      return card;
+    }
+
+    function gameCard(b) {
+      const { game, leaderboard } = b;
+      const card = el('div', 'card');
+      const h = el('h2');
+      const title = el('span', 'grow', `${game.emoji} ${game.title} `);
+      const plays = leaderboard.reduce((n, r) => n + r.plays, 0);
+      title.appendChild(el('small', 'muted', plays ? `${plays}판` : ''));
+      const play = el('a', 'play', '하러 가기');
+      play.href = game.url;
+      h.append(title, play);
+      card.appendChild(h);
+
+      const top = el('ul', 'top');
+      if (!leaderboard.length) top.appendChild(el('li', 'muted', '아직 아무도 안 했어요. 첫 기록을 남겨 보세요!'));
+      for (const r of leaderboard.slice(0, 3)) {
+        const li = el('li', r.me ? 'me' : '');
+        li.append(
+          el('span', 'rank', medal[r.rank - 1]),
+          el('span', 'name', r.me ? `${r.name} (나)` : r.name),
+          el('span', 'score', `${fmt(r.best)}${game.scoreUnit}`),
+        );
+        top.appendChild(li);
+      }
+      card.appendChild(top);
+
+      if (leaderboard.length) {
+        const more = el('button', 'more', '전체 순위·최근 기록 보기 ▾');
+        const detail = el('div', 'detail');
+        detail.hidden = true;
+        more.addEventListener('click', () => {
+          detail.hidden = !detail.hidden;
+          more.textContent = detail.hidden ? '전체 순위·최근 기록 보기 ▾' : '접기 ▴';
+          if (!detail.hidden && !detail.childElementCount) FamilyGames.renderBoard(detail, b);
+        });
+        card.append(more, detail);
+      }
+      return card;
+    }
+
+    async function load() {
+      const content = document.getElementById('content');
+      await FamilyGames.flushPending();
+      let boards;
+      try {
+        const res = await fetch('/api/games/records', { credentials: 'same-origin', cache: 'no-store' });
+        if (!res.ok) throw new Error(res.status === 401 ? '로그인이 필요해요.' : '기록을 불러올 수 없어요.');
+        boards = await res.json();
+      } catch (e) {
+        content.className = 'error';
+        content.textContent = e.message.includes('fetch') ? '서버에 연결할 수 없어요.' : e.message;
+        return;
+      }
+      content.className = '';
+      content.innerHTML = '';
+      content.style.cssText = 'display:flex;flex-direction:column;gap:14px';
+      content.appendChild(summary(boards));
+      // Games someone has played come first, most played on top.
+      const plays = (b) => b.leaderboard.reduce((n, r) => n + r.plays, 0);
+      for (const b of [...boards].sort((a, z) => plays(z) - plays(a))) content.appendChild(gameCard(b));
+    }
+
+    load();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') load();
+    });
+  </script>
+</body>
+</html>

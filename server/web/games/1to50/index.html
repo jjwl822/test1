@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ko">
+<head><script src="/games/wv-fix.js?v=3"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>1 to 50</title>
+  <style>
+    :root { --bg: #f4f6fa; --fg: #222; --muted: #7a8294; --card: #fff; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #111318; --fg: #eef0f6; --muted: #98a0b2; --card: #20232b; } }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overscroll-behavior: none; touch-action: manipulation;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; user-select: none; -webkit-user-select: none; }
+    main { max-width: 480px; height: 100%; margin: 0 auto; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); display: flex; flex-direction: column; gap: 14px; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 22px; margin: 0; }
+    .stats { display: flex; gap: 14px; color: var(--muted); }
+    .stats b { color: var(--fg); font-size: 20px; font-variant-numeric: tabular-nums; }
+    .next { text-align: center; font-size: 18px; color: var(--muted); }
+    .next b { font-size: 34px; color: var(--fg); font-variant-numeric: tabular-nums; }
+    .grid { display: grid; grid-template-columns: repeat(5, 1fr); grid-template-rows: repeat(5, 1fr); gap: 8px; aspect-ratio: 1; }
+    .grid button { min-width: 0; min-height: 0; }
+    .grid.wrong { animation: shake .25s; }
+    @keyframes shake { 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
+    .grid button { border: 0; border-radius: 12px; font-size: clamp(22px, 7.5vw, 32px); font-weight: 800; font-family: inherit;
+      font-variant-numeric: tabular-nums; color: #fff; background: #5b8def; box-shadow: 0 3px 0 rgba(0,0,0,.15); }
+    .grid button.second { background: #ff8a3d; }
+    .grid button.empty { background: transparent; box-shadow: none; pointer-events: none; }
+    .grid button.hit { animation: hit .15s; }
+    @keyframes hit { 50% { transform: scale(.85); } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>🔟 1 to 50</h1>
+      <div class="stats"><span><b id="time">0.0</b>초</span></div>
+    </header>
+    <div class="next">다음 숫자 <b id="next">1</b></div>
+    <div class="grid" id="grid"></div>
+  </main>
+
+  <script src="/games/family-games.js"></script>
+  <script>
+    const gridEl = document.getElementById('grid');
+    const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+    const shuffle = (list) => {
+      for (let i = list.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [list[i], list[j]] = [list[j], list[i]];
+      }
+      return list;
+    };
+    let next = 1, later = [], startedAt = 0, tick = null, playing = false;
+
+    function build() {
+      gridEl.innerHTML = '';
+      for (const n of shuffle(range(1, 25))) {
+        const b = document.createElement('button');
+        b.textContent = n;
+        b.dataset.n = n;
+        b.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          press(b);
+        });
+        gridEl.appendChild(b);
+      }
+    }
+
+    function press(b) {
+      if (!playing) return;
+      if (Number(b.dataset.n) !== next) {
+        gridEl.classList.remove('wrong');
+        void gridEl.offsetWidth;
+        gridEl.classList.add('wrong');
+        navigator.vibrate?.(50);
+        return;
+      }
+      navigator.vibrate?.(6);
+      b.classList.remove('hit');
+      void b.offsetWidth;
+      b.classList.add('hit');
+      // 1~25 are replaced by 26~50; 26~50 disappear.
+      if (next <= 25) {
+        const n = later.pop();
+        b.textContent = n;
+        b.dataset.n = n;
+        b.classList.add('second');
+      } else {
+        b.textContent = '';
+        b.dataset.n = '';
+        b.className = 'empty';
+      }
+      next++;
+      document.getElementById('next').textContent = next <= 50 ? next : '🎉';
+      if (next > 50) finish();
+    }
+
+    function start() {
+      next = 1;
+      later = shuffle(range(26, 50));
+      build();
+      document.getElementById('next').textContent = '1';
+      document.getElementById('time').textContent = '0.0';
+      playing = true;
+      startedAt = performance.now();
+      clearInterval(tick);
+      tick = setInterval(() => {
+        document.getElementById('time').textContent = ((performance.now() - startedAt) / 1000).toFixed(1);
+      }, 50);
+    }
+
+    function finish() {
+      playing = false;
+      clearInterval(tick);
+      const seconds = Math.round((performance.now() - startedAt) / 10) / 100;
+      document.getElementById('time').textContent = seconds.toFixed(2);
+      setTimeout(() => FamilyGames.finish(seconds, `${seconds.toFixed(2)}초 만에 50까지! 🔟`), 300);
+    }
+
+    build();
+    FamilyGames.setup({
+      title: '1 to 50', emoji: '🔟',
+      howTo: '1부터 50까지 순서대로 빠르게 눌러요.\n1~25를 누르면 그 자리에 26~50이 나타나요.\n빠를수록 1등!',
+      onStart: start,
+    });
+  </script>
+</body>
+</html>

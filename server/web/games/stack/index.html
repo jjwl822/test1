@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ko">
+<head><script src="/games/wv-fix.js?v=3"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>블록 쌓기</title>
+  <style>
+    :root { --bg: #f3f1fb; --fg: #222; --muted: #7d7896; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #13121b; --fg: #efeef6; --muted: #9c98b6; } }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overscroll-behavior: none; touch-action: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; user-select: none; -webkit-user-select: none; }
+    main { max-width: 480px; height: 100%; margin: 0 auto; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); display: flex; flex-direction: column; gap: 12px; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 22px; margin: 0; }
+    .stats { display: flex; gap: 14px; color: var(--muted); }
+    .stats b { color: var(--fg); font-size: 20px; font-variant-numeric: tabular-nums; }
+    .wrap { flex: 1; position: relative; border-radius: 20px; overflow: hidden; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>🧱 블록 쌓기</h1>
+      <div class="stats"><span><b id="score">0</b>층</span></div>
+    </header>
+    <div class="wrap" id="wrap"><canvas id="canvas"></canvas></div>
+  </main>
+
+  <script src="/games/family-games.js"></script>
+  <script>
+    const wrap = document.getElementById('wrap');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const PERFECT = 6;
+    let W = 0, H = 0, BH = 28, stack = [], cur = null, debris = [], camY = 0, state = 'idle', last = 0, overAt = 0;
+    let flash = null; // { text, until }
+
+    function fit() {
+      const dpr = window.devicePixelRatio || 1;
+      const r = wrap.getBoundingClientRect();
+      W = r.width;
+      H = r.height;
+      BH = Math.max(22, Math.min(34, H / 18));
+      canvas.width = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    const color = (i) => `hsl(${(200 + i * 14) % 360} 72% 60%)`;
+    const layerY = (i) => H - 30 - (i + 1) * BH; // top edge of layer i, before camera
+    const score = () => stack.length - 1;
+
+    function spawn() {
+      const top = stack[stack.length - 1];
+      const fromLeft = stack.length % 2 === 0;
+      cur = { x: fromLeft ? -top.w : W, w: top.w, dir: fromLeft ? 1 : -1 };
+    }
+
+    function drop() {
+      if (state !== 'play') return;
+      const top = stack[stack.length - 1];
+      const i = stack.length;
+      if (Math.abs(cur.x - top.x) <= PERFECT) {
+        cur.x = top.x;
+        flash = { text: '완벽해요! ✨', until: performance.now() + 700 };
+        navigator.vibrate?.([10, 30, 10]);
+      }
+      const left = Math.max(cur.x, top.x), right = Math.min(cur.x + cur.w, top.x + top.w);
+      const overlap = right - left;
+      if (overlap <= 0) {
+        debris.push({ x: cur.x, y: layerY(i), w: cur.w, vy: 0, c: color(i) });
+        cur = null;
+        state = 'over';
+        overAt = performance.now();
+        navigator.vibrate?.(80);
+        return;
+      }
+      // The part hanging over the edge falls off.
+      if (cur.x < left) debris.push({ x: cur.x, y: layerY(i), w: left - cur.x, vy: 0, c: color(i) });
+      if (cur.x + cur.w > right) debris.push({ x: right, y: layerY(i), w: cur.x + cur.w - right, vy: 0, c: color(i) });
+      stack.push({ x: left, w: overlap });
+      document.getElementById('score').textContent = score();
+      navigator.vibrate?.(10);
+      spawn();
+    }
+
+    // Fingers via touch events (same on iPhone Safari and the Android app), the mouse via pointer events.
+    wrap.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      drop();
+    }, { passive: false });
+    wrap.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse') drop();
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        drop();
+      }
+    });
+
+    function frame(now) {
+      const dt = Math.min(0.033, (now - last) / 1000);
+      last = now;
+      if (state === 'play' && cur) {
+        const speed = W * (0.5 + Math.min(score(), 30) * 0.025);
+        cur.x += cur.dir * speed * dt;
+        if (cur.x + cur.w > W + cur.w * 0.4) cur.dir = -1;
+        if (cur.x < -cur.w * 0.4) cur.dir = 1;
+      }
+      for (const d of debris) {
+        d.vy += H * 3 * dt;
+        d.y += d.vy * dt;
+      }
+      debris = debris.filter((d) => d.y - camY < H + 50);
+      const target = Math.max(0, stack.length * BH - H * 0.5);
+      camY += (target - camY) * Math.min(1, dt * 6);
+      draw(now);
+      if (state === 'over' && now - overAt > 900) {
+        state = 'done';
+        FamilyGames.finish(score(), `${score()}층까지 쌓았어요! 🧱`);
+        return;
+      }
+      if (state === 'play' || state === 'over') requestAnimationFrame(frame);
+    }
+
+    function block(x, y, w, c) {
+      ctx.fillStyle = c;
+      ctx.fillRect(x, y, w, BH - 2);
+      ctx.fillStyle = 'rgba(255,255,255,.25)';
+      ctx.fillRect(x, y, w, 4);
+    }
+
+    function draw(now = performance.now()) {
+      const sky = ctx.createLinearGradient(0, 0, 0, H);
+      const hue = 230 + Math.min(score(), 60) * 1.5;
+      sky.addColorStop(0, `hsl(${hue} 60% 22%)`);
+      sky.addColorStop(1, `hsl(${hue - 20} 55% 45%)`);
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, W, H);
+      ctx.save();
+      ctx.translate(0, camY);
+      ctx.fillStyle = 'rgba(0,0,0,.25)';
+      ctx.fillRect(0, H - 30, W, 30 + camY);
+      stack.forEach((b, i) => block(b.x, layerY(i), b.w, color(i)));
+      if (cur) block(cur.x, layerY(stack.length), cur.w, color(stack.length));
+      for (const d of debris) block(d.x, d.y, d.w, d.c);
+      ctx.restore();
+      if (flash && now < flash.until) {
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 24px -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(flash.text, W / 2, H * 0.2);
+      }
+    }
+
+    function reset() {
+      fit();
+      const w = W * 0.62;
+      stack = [{ x: (W - w) / 2, w }];
+      debris = [];
+      camY = 0;
+      flash = null;
+      cur = null;
+      document.getElementById('score').textContent = '0';
+    }
+
+    function start() {
+      reset();
+      spawn();
+      state = 'play';
+      last = performance.now();
+      requestAnimationFrame(frame);
+    }
+
+    window.addEventListener('resize', () => {
+      if (state !== 'play') {
+        reset();
+        draw();
+      }
+    });
+
+    reset();
+    draw();
+    FamilyGames.setup({
+      title: '블록 쌓기', emoji: '🧱',
+      howTo: '좌우로 움직이는 블록을 터치해서 떨어뜨려요.\n아래 블록에서 벗어난 부분은 잘려 나가요.\n높이 쌓을수록 1등!',
+      onStart: start,
+    });
+  </script>
+</body>
+</html>

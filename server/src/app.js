@@ -315,7 +315,7 @@ export function createServer({
     ringSeconds,
   });
   registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes: Object.keys(MEDIA_TYPES), now, notify });
-  registerGameRoutes(app, { db, auth, gamesDir });
+  registerGameRoutes(app, { db, auth, gamesDir, errorLog: path.join(dataDir, 'game-errors.log') });
   const family = registerFamilyRoutes(app, {
     db,
     auth,
@@ -325,6 +325,17 @@ export function createServer({
     notify,
     now,
     reminderHour,
+  });
+
+  // TEMP: which phones load which game pages (debugging blank games in the Android app).
+  app.use('/games', (req, res, next) => {
+    res.on('finish', () => {
+      try {
+        const line = { at: new Date().toISOString(), path: req.originalUrl, status: res.statusCode, ua: String(req.headers['user-agent'] ?? '').slice(0, 200) };
+        fs.appendFileSync(path.join(dataDir, 'game-requests.log'), `${JSON.stringify(line)}\n`);
+      } catch {}
+    });
+    next();
   });
 
   // The web app (iPhone / PC). index.html and the service worker are never cached so updates show up.

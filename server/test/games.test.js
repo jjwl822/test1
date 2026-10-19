@@ -96,3 +96,65 @@ test('the bundled games.json lists games that exist', () => {
   assert.ok(list.length >= 2);
   for (const g of list) assert.ok(fs.existsSync(new URL(`${g.id}/index.html`, dir)), `${g.id}/index.html`);
 });
+
+test('every play is kept, resends count once, and records can be read without playing', async () => {
+  fs.writeFileSync(
+    path.join(gamesDir, 'games.json'),
+    JSON.stringify([
+      { id: 'quiz', title: '퀴즈' },
+      { id: 'race', title: '달리기', scoreOrder: 'low', scoreUnit: '초' },
+      { id: 'board', title: '기록판', scores: false },
+    ]),
+  );
+  fs.mkdirSync(path.join(gamesDir, 'board'), { recursive: true });
+  fs.writeFileSync(path.join(gamesDir, 'board', 'index.html'), '<!doctype html>');
+  const dad = await reg('dad', '아빠');
+  const grandma = await reg('grandma', '할머니');
+
+  const games = (await call(dad.token, 'GET', '/api/games')).data;
+  assert.deepEqual(games.map((g) => [g.id, g.scores]), [['quiz', true], ['race', true], ['board', false]]);
+  assert.equal((await call(dad.token, 'POST', '/api/games/board/scores', { score: 1 })).status, 404);
+
+  // Each play counts, and the board shows the latest score next to the best.
+  for (const score of [20, 35, 28]) await call(dad.token, 'POST', '/api/games/quiz/scores', { score });
+  const quiz = (await call(grandma.token, 'GET', '/api/games/quiz/scores')).data;
+  const dadRow = quiz.leaderboard.find((r) => r.name === '아빠');
+  assert.deepEqual([dadRow.best, dadRow.plays, dadRow.last, dadRow.me], [35, 3, 28, false]);
+  assert.deepEqual(quiz.recent.slice(0, 3).map((r) => [r.name, r.score]), [['아빠', 28], ['아빠', 35], ['아빠', 20]]);
+
+  // A score resent after a dropped connection is saved once, at the time it was played.
+  const playedAt = Date.now() - 60_000;
+  const first = await call(grandma.token, 'POST', '/api/games/race/scores', { score: 9.5, clientId: 'abcdef12-retry', playedAt });
+  const again = await call(grandma.token, 'POST', '/api/games/race/scores', { score: 9.5, clientId: 'abcdef12-retry', playedAt });
+  assert.equal(first.status, 201);
+  assert.equal(again.status, 200);
+  assert.equal(again.data.duplicate, true);
+  const race = (await call(grandma.token, 'GET', '/api/games/race/scores')).data;
+  const mine = race.leaderboard.find((r) => r.me);
+  assert.equal(mine.plays, 1);
+  assert.equal(mine.lastAt, playedAt);
+  // A made-up future time is replaced with now.
+  const future = await call(grandma.token, 'POST', '/api/games/race/scores', { score: 11, playedAt: Date.now() + 1e9 });
+  assert.ok(future.data.recent[0].at <= Date.now());
+
+  // The records board gets every scored game at once.
+  const records = (await call(grandma.token, 'GET', '/api/games/records')).data;
+  assert.deepEqual(records.map((r) => r.game.id), ['quiz', 'race']);
+  assert.equal(records[0].leaderboard.find((r) => r.name === '아빠').plays, 3);
+  assert.ok(records[1].recent.length >= 2);
+  assert.equal((await fetch(`${base}/api/games/records`)).status, 401);
+});
+
+test('script errors from games are written to the error log', async () => {
+  const errorLog = path.join(dataDir, 'game-errors.log');
+  const kid = await reg('errkid', '막내');
+  const res = await fetch(`${base}/api/games/quiz/errors`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${kid.token}`, 'content-type': 'application/json', 'user-agent': 'TestPhone/1.0' },
+    body: JSON.stringify({ message: 'x is not defined', where: 'quiz/index.html:10:5' }),
+  });
+  assert.equal(res.status, 204);
+  const line = JSON.parse(fs.readFileSync(errorLog, 'utf8').trim().split('\n').pop());
+  assert.deepEqual([line.user, line.game, line.message, line.where, line.ua], ['막내', 'quiz', 'x is not defined', 'quiz/index.html:10:5', 'TestPhone/1.0']);
+  assert.equal((await fetch(`${base}/api/games/quiz/errors`, { method: 'POST' })).status, 401);
+});

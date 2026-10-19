@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ko">
+<head><script src="/games/wv-fix.js?v=3"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>암산 대결</title>
+  <style>
+    :root { --bg: #f2f7f2; --fg: #222; --muted: #6f7f72; --card: #fff; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #111712; --fg: #eef4ef; --muted: #98aa9b; --card: #1f2821; } }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overscroll-behavior: none; touch-action: manipulation;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; user-select: none; -webkit-user-select: none; }
+    main { max-width: 480px; height: 100%; margin: 0 auto; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); display: flex; flex-direction: column; gap: 14px; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 22px; margin: 0; }
+    .stats { display: flex; gap: 14px; color: var(--muted); }
+    .stats b { color: var(--fg); font-size: 20px; font-variant-numeric: tabular-nums; }
+    .bar { height: 8px; border-radius: 4px; background: rgba(0,0,0,.1); overflow: hidden; }
+    .bar i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #34c759, #ffcc00, #ff3b30); }
+    .q { flex: 1; display: grid; place-items: center; background: var(--card); border-radius: 22px; box-shadow: 0 2px 10px rgba(0,0,0,.06);
+      font-size: clamp(48px, 16vw, 76px); font-weight: 900; font-variant-numeric: tabular-nums; }
+    .q.wrong { animation: shake .3s; color: #ff3b30; }
+    .q.right { color: #28b14c; }
+    @keyframes shake { 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
+    .answers { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .answers button { border: 0; border-radius: 16px; padding: 22px 0; font-size: 30px; font-weight: 800; color: var(--fg);
+      background: var(--card); box-shadow: 0 2px 8px rgba(0,0,0,.08); font-family: inherit; font-variant-numeric: tabular-nums; }
+    .answers button:active { transform: scale(.97); }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>🧮 암산 대결</h1>
+      <div class="stats"><span>맞힘 <b id="score">0</b></span><span><b id="left">30</b>초</span></div>
+    </header>
+    <div class="bar"><i id="bar"></i></div>
+    <div class="q" id="q">3 + 4</div>
+    <div class="answers" id="answers"></div>
+  </main>
+
+  <script src="/games/family-games.js"></script>
+  <script>
+    const SECONDS = 30, PENALTY = 2;
+    const rand = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+    const shuffle = (list) => {
+      for (let i = list.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [list[i], list[j]] = [list[j], list[i]];
+      }
+      return list;
+    };
+    let answer, score = 0, endAt = 0, running = false, tick = null, locked = false;
+
+    /** Harder problems as the score goes up. */
+    function problem() {
+      const kind = score < 5 ? '+' : score < 10 ? (Math.random() < 0.5 ? '+' : '-') : score < 16 ? '×' : ['+', '-', '×'][rand(0, 2)];
+      const big = score >= 16;
+      if (kind === '+') {
+        const a = score < 5 ? rand(1, 9) : rand(big ? 15 : 5, big ? 89 : 49), b = score < 5 ? rand(1, 9) : rand(3, big ? 49 : 19);
+        return [`${a} + ${b}`, a + b];
+      }
+      if (kind === '-') {
+        const a = rand(big ? 30 : 10, big ? 99 : 50), b = rand(2, a - 1);
+        return [`${a} − ${b}`, a - b];
+      }
+      const a = rand(2, 9), b = rand(big ? 6 : 2, big ? 19 : 9);
+      return [`${a} × ${b}`, a * b];
+    }
+
+    function next() {
+      const [text, value] = problem();
+      answer = value;
+      const q = document.getElementById('q');
+      q.className = 'q';
+      q.textContent = text;
+      const options = new Set([value]);
+      while (options.size < 4) {
+        const near = value + (Math.random() < 0.5 ? -1 : 1) * rand(1, Math.max(3, Math.round(value * 0.2)));
+        if (near >= 0) options.add(near);
+      }
+      const answers = document.getElementById('answers');
+      answers.innerHTML = '';
+      for (const n of shuffle([...options])) {
+        const b = document.createElement('button');
+        b.textContent = n;
+        b.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          choose(n);
+        });
+        answers.appendChild(b);
+      }
+      locked = false;
+    }
+
+    function choose(n) {
+      if (!running || locked) return;
+      locked = true;
+      const q = document.getElementById('q');
+      if (n === answer) {
+        score++;
+        document.getElementById('score').textContent = score;
+        q.className = 'q right';
+        navigator.vibrate?.(8);
+        setTimeout(next, 120);
+      } else {
+        endAt -= PENALTY * 1000;
+        q.className = 'q wrong';
+        q.textContent = `= ${answer}`;
+        navigator.vibrate?.(60);
+        setTimeout(next, 600);
+      }
+    }
+
+    function start() {
+      score = 0;
+      document.getElementById('score').textContent = '0';
+      endAt = Date.now() + SECONDS * 1000;
+      running = true;
+      next();
+      clearInterval(tick);
+      tick = setInterval(() => {
+        const left = Math.max(0, endAt - Date.now());
+        document.getElementById('left').textContent = Math.ceil(left / 1000);
+        document.getElementById('bar').style.width = `${(left / (SECONDS * 1000)) * 100}%`;
+        if (left === 0) finish();
+      }, 100);
+    }
+
+    function finish() {
+      running = false;
+      clearInterval(tick);
+      FamilyGames.finish(score, `${score}문제 맞혔어요! 🧮`);
+    }
+
+    FamilyGames.setup({
+      title: '암산 대결', emoji: '🧮',
+      howTo: `${SECONDS}초 동안 계산 문제를 풀어요.\n맞힐수록 문제가 어려워져요.\n틀리면 ${PENALTY}초가 줄어요.`,
+      onStart: start,
+    });
+  </script>
+</body>
+</html>
