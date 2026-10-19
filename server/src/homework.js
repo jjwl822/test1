@@ -37,7 +37,10 @@ const SCHEMA = {
   },
 };
 
-function prompt(text, today) {
+function prompt(text, today, existing = []) {
+  const already = existing.length
+    ? `- 아래는 이미 숙제 목록에 있는 항목이에요. 표현이 달라도 같은 일이면 빼세요.\n${existing.map((t) => `  · ${t}`).join('\n')}\n`
+    : '';
   const time = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
   const day = `${localDate(today)}(${WEEKDAYS[today.getDay()]}) ${time}`;
   return `지금은 ${day}입니다. 새벽이라도 "오늘"은 이 날짜예요. 아래는 엄마가 가족 단체방에 붙여넣은 아이의 학원·학교 공지나 숙제 메모입니다.
@@ -45,7 +48,7 @@ function prompt(text, today) {
 - 항목마다 한 가지 일만, 짧은 한국어로 (40자 안팎).
 - 단순 안내, 상품·행사 소식, 선생님 인사는 빼세요.
 - "월요일까지", "내일", "오늘" 같은 마감은 오늘 날짜를 기준으로 YYYY-MM-DD로 바꾸세요. 마감이 없으면 null.
-
+${already}
 ---
 ${text}`;
 }
@@ -63,7 +66,7 @@ function defaultClaude() {
 export function claudeExtractor({ command = defaultClaude(), model = 'sonnet', effort = 'medium', timeoutMs = 120_000 } = {}) {
   // An empty folder, so the CLI doesn't pick up project files or settings from the server folder.
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'fm-homework-'));
-  return (text, today) =>
+  return (text, today, existing) =>
     new Promise((resolve, reject) => {
       const args = ['-p', '--model', model, '--effort', effort, '--output-format', 'json', '--json-schema', JSON.stringify(SCHEMA),
         '--tools', '', '--no-session-persistence'];
@@ -89,7 +92,7 @@ export function claudeExtractor({ command = defaultClaude(), model = 'sonnet', e
           reject(new Error(`claude exited ${code}: ${e.message} ${err.slice(0, 300)}`));
         }
       });
-      child.stdin.end(prompt(text, today));
+      child.stdin.end(prompt(text, today, existing));
     });
 }
 
@@ -121,8 +124,8 @@ export const dedupeKey = (text) => text.toLowerCase().replace(/[^\p{L}\p{N}]/gu,
  *
  * A message counts when it contains 📢 (pasted academy notices), or when the parent follows a
  * notice with a short "유이숙제" / "숙제" message, which takes the messages they sent just before.
- * Each message is used once. Items are deduplicated against unfinished homework, so pasting the
- * same notice twice adds nothing.
+ * Each message is used once, a notice pasted again is skipped, and items are deduplicated against
+ * unfinished homework (Claude is also shown the open items and told to leave those out).
  */
 export function createHomework({ db, authors, assignee, extract, now, listsChanged, notify, logMessage, log = console }) {
   const userId = (username) => db.prepare('SELECT id FROM users WHERE username = ?').get(username)?.id;
@@ -132,6 +135,11 @@ export function createHomework({ db, authors, assignee, extract, now, listsChang
   const before = db.prepare(`
     SELECT id, sender_id, text, created_at FROM messages
     WHERE conversation_id = ? AND id < ? AND deleted = 0 ORDER BY id DESC LIMIT ?`);
+  const openTexts = db.prepare("SELECT text FROM list_items WHERE list = 'homework' AND done = 0 ORDER BY id");
+  // Notices already read in the last 60 days, to spot the same notice pasted again.
+  const pastNotices = db.prepare(`
+    SELECT m.text FROM homework_sources h JOIN messages m ON m.id = h.message_id
+    WHERE h.created_at > ? AND m.text IS NOT NULL`);
   const openKeys = db.prepare("SELECT dedupe FROM list_items WHERE list = 'homework' AND done = 0 AND dedupe IS NOT NULL");
   const insert = db.prepare(`
     INSERT INTO list_items (list, text, author_id, created_at, due, assignee_id, source_job, dedupe)
@@ -153,6 +161,16 @@ export function createHomework({ db, authors, assignee, extract, now, listsChang
     return found;
   }
 
+  /** True when [text] is a notice that was already read (pasted again, maybe with a word added). */
+  function seenBefore(text) {
+    const key = dedupeKey(text);
+    if (key.length < 20) return false;
+    return pastNotices.all(Date.now() - 60 * 86400000).some(({ text: old }) => {
+      const k = dedupeKey(old);
+      return k.length >= 20 && (key.includes(k) || k.includes(key));
+    });
+  }
+
   let queue = Promise.resolve();
 
   /** Called for every text message a person sends. */
@@ -165,10 +183,16 @@ export function createHomework({ db, authors, assignee, extract, now, listsChang
     else if (message.text.includes(NOTICE)) sources = [{ id: message.id, text: message.text }];
     else return;
     if (!sources.length) return;
+    // Claude words items a little differently each time, so a notice pasted again is caught here.
+    const fresh = sources.filter((s) => !seenBefore(s.text));
     // Claim the messages now, so a 📢 notice followed by "유이숙제" is handled once.
     const job = sources[0].id;
     for (const s of sources) addSource.run(s.id, job, Date.now());
-    const text = sources.map((s) => s.text).join('\n\n');
+    if (!fresh.length) {
+      logMessage(message.senderId, '📚 이미 숙제 목록에 넣은 공지예요.');
+      return queue;
+    }
+    const text = fresh.map((s) => s.text).join('\n\n');
     queue = queue.then(() => run(job, text, message.senderId)).catch((e) => log.warn('숙제 정리 실패:', e));
     return queue;
   }
@@ -177,7 +201,7 @@ export function createHomework({ db, authors, assignee, extract, now, listsChang
     let items;
     let fallback = false;
     try {
-      items = await extract(text, now());
+      items = await extract(text, now(), openTexts.all().map((r) => r.text));
     } catch (e) {
       log.warn('Claude로 숙제를 정리하지 못해 원문 줄을 그대로 씁니다:', e.message);
       items = ruleExtract(text);

@@ -15,8 +15,8 @@ const calls = [];
 let failNext = false;
 
 /** Stands in for Claude: one item per "- " line, "월요일" → the 19th. */
-async function fakeExtract(text, today) {
-  calls.push({ text, today });
+async function fakeExtract(text, today, existing) {
+  calls.push({ text, today, existing });
   if (failNext) {
     failNext = false;
     throw new Error('claude unavailable');
@@ -121,6 +121,22 @@ test('📢 notices are picked up on their own and duplicates are skipped', async
   await say(mom, '유이숙제');
   await server.homeworkIdle();
   assert.equal(calls.length, before + 1);
+
+  // The same notice pasted again a day later (with a stray word) isn't sent to Claude again,
+  // since Claude would word the items differently and slip past the item check.
+  await say(mom, '붙여📢 Vocab Test\n- 단어시험 5주+6주 연습\n- 31쪽 끝내기');
+  await server.homeworkIdle();
+  assert.equal(calls.length, before + 1);
+  const chat = (await call('GET', '/api/conversations/family/messages', { token: kid.token })).data;
+  assert.equal(chat.at(-1).text, '📚 이미 숙제 목록에 넣은 공지예요.');
+});
+
+test('Claude is shown the homework already on the list', async () => {
+  const { mom } = await setup();
+  await say(mom, '📢 새 공지\n- 받아쓰기 3단원 연습하기');
+  await server.homeworkIdle();
+  const existing = calls.at(-1).existing;
+  assert.ok(existing.includes('31쪽 끝내기'));
 });
 
 test('when Claude fails the "- " lines are used as they are', async () => {
