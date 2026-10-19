@@ -126,7 +126,7 @@ export function ListsScreen({ keys = ['shopping', 'todo'], title = '함께 쓰�
       html`<input class="date-input" type="date" value=${due} min=${isoDate(new Date())} onInput=${(e) => setDue(e.target.value)} aria-label="마감일" />`}
       <button class="link" disabled=${!draft.trim()} onClick=${add}>추가</button>
     </div>
-    ${homework && html`<div class="tiny muted" style="padding:0 16px 8px">단체방에 📢 공지를 올리거나, 공지 뒤에 "유이숙제"·"유호숙제"라고 보내면 자동으로 들어와요.</div>`}
+    ${homework && html`<div class="tiny muted" style="padding:0 16px 8px">대화방에 📢 공지를 올리거나, 공지 뒤에 "유이숙제"·"유호숙제"라고 보내면 자동으로 들어와요.</div>`}
     ${error && html`<div class="error">${error}</div>`}
     <div class="scroll">
       ${items === null && html`<${Spinner} />`}

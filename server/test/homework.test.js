@@ -243,3 +243,14 @@ test('homework is split between the children', async () => {
   const bad = await call('PATCH', `/api/lists/items/${item.id}`, { token: mom.token, json: { assigneeId: mom.user.id } });
   assert.equal(bad.status, 400);
 });
+
+test('a notice sent in a 1:1 chat counts too, and the reply goes there', async () => {
+  const { mom, boy } = await setup();
+  const dm = `dm-${Math.min(mom.user.id, boy.user.id)}-${Math.max(mom.user.id, boy.user.id)}`;
+  await call('POST', `/api/conversations/${dm}/messages`, { token: mom.token, json: { text: '태권도\n- 도복 챙기기' } });
+  await call('POST', `/api/conversations/${dm}/messages`, { token: mom.token, json: { text: '유호숙제' } });
+  await server.homeworkIdle();
+  assert.equal((await homework(boy)).find((i) => i.text === '도복 챙기기')?.assigneeName, '유호');
+  const chat = (await call('GET', `/api/conversations/${dm}/messages`, { token: boy.token })).data;
+  assert.match(chat.at(-1).text, /📚 유호 숙제 1개/);
+});

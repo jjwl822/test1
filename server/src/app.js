@@ -7,7 +7,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { openDatabase } from './db.js';
 import { createCalls } from './calls.js';
-import { GROUP_ID, participants, registerChatRoutes } from './chat.js';
+import { participants, registerChatRoutes } from './chat.js';
 import { registerFamilyRoutes } from './family.js';
 import { createHomework } from './homework.js';
 import { registerFeedRoutes } from './feed.js';
@@ -342,7 +342,6 @@ export function createServer({
     homework,
   });
   if (homework?.extract && homework.authors?.length) {
-    const everyone = () => db.prepare('SELECT id FROM users').all().map((r) => r.id);
     homeworkBot = createHomework({
       db,
       authors: homework.authors,
@@ -352,8 +351,9 @@ export function createServer({
       now,
       listsChanged: family.listsChanged,
       notify,
-      // Shown in the family chat as a quiet line from the parent (like the 📞 call records).
-      logMessage: (senderId, text) => chat.logMessage(GROUP_ID, senderId, text, everyone(), { silent: true }),
+      // Shown in the chat the notice came from, as a quiet line from the parent (like the 📞 call records).
+      logMessage: (conversationId, senderId, text) =>
+        chat.logMessage(conversationId, senderId, text, participants(db, conversationId) ?? [], { silent: true }),
     });
   }
 

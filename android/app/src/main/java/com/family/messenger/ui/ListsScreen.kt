@@ -159,7 +159,7 @@ fun ListsScreen(app: FamilyApp, keys: List<String> = listOf("shopping", "todo"),
             }
             if (homework) {
                 Text(
-                    "단체방에 📢 공지를 올리거나, 공지 뒤에 \"유이숙제\"·\"유호숙제\"라고 보내면 자동으로 들어와요.",
+                    "대화방에 📢 공지를 올리거나, 공지 뒤에 \"유이숙제\"·\"유호숙제\"라고 보내면 자동으로 들어와요.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),

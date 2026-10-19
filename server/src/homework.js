@@ -2,7 +2,6 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { GROUP_ID } from './chat.js';
 import { localDate } from './family.js';
 
 // "유이숙제", "유이 숙제", "숙제!" sent right after a pasted notice means "that was homework".
@@ -139,7 +138,8 @@ export function homeworkPeople(db, { children, assignee } = {}) {
 }
 
 /**
- * Turns homework notices that a parent posts in the family chat into items on the 📚 숙제 list.
+ * Turns homework notices that a parent posts in any chat (family group or 1:1) into items on the
+ * 📚 숙제 list. Replies go into the same chat.
  *
  * A message counts when it contains 📢 (pasted academy notices), or when the parent follows a
  * notice with a short "유이숙제" / "숙제" message, which takes the messages they sent just before.
@@ -183,7 +183,7 @@ export function createHomework({ db, authors, children, assignee, extract, now, 
   function noticeBefore(trigger, claimed) {
     const found = [];
     let after = trigger.createdAt;
-    for (const row of before.all(GROUP_ID, trigger.id, 10)) {
+    for (const row of before.all(trigger.conversationId, trigger.id, 10)) {
       if (after - row.created_at > GAP) break;
       // Someone else chiming in between the notice and "유이숙제" doesn't end it.
       if (row.sender_id !== trigger.senderId || !row.text || row.text.startsWith(BOT)) continue;
@@ -210,9 +210,11 @@ export function createHomework({ db, authors, children, assignee, extract, now, 
 
   /** Called for every text message a person sends. */
   function onMessage(message) {
-    if (message.conversationId !== GROUP_ID || message.kind !== 'text' || !message.text) return;
+    if (message.kind !== 'text' || !message.text) return;
     const allowed = authors.map(userId).filter(Boolean);
     if (!allowed.includes(message.senderId)) return;
+    const room = message.conversationId;
+    const reply = (text) => logMessage(room, message.senderId, text);
     let sources;
     const claimed = new Set();
     const child = childFor(message.text);
@@ -221,7 +223,7 @@ export function createHomework({ db, authors, children, assignee, extract, now, 
     else return;
     // "유호숙제" after a 📢 notice that was filed for the first child: move it over, once it's done.
     if (claimed.size && child) {
-      queue = queue.then(() => moveTo(child, [...claimed], message.senderId)).catch((e) => log.warn('숙제 옮기기 실패:', e));
+      queue = queue.then(() => moveTo(child, [...claimed], reply)).catch((e) => log.warn('숙제 옮기기 실패:', e));
     }
     if (!sources.length) return queue;
     // Claude words items a little differently each time, so a notice pasted again is caught here.
@@ -230,24 +232,24 @@ export function createHomework({ db, authors, children, assignee, extract, now, 
     const job = sources[0].id;
     for (const s of sources) addSource.run(s.id, job, Date.now());
     if (!fresh.length) {
-      logMessage(message.senderId, '📚 이미 숙제 목록에 넣은 공지예요.');
+      reply('📚 이미 숙제 목록에 넣은 공지예요.');
       return queue;
     }
     const text = fresh.map((s) => s.text).join('\n\n');
-    queue = queue.then(() => run(job, text, message.senderId, child)).catch((e) => log.warn('숙제 정리 실패:', e));
+    queue = queue.then(() => run(job, text, message.senderId, child, reply)).catch((e) => log.warn('숙제 정리 실패:', e));
     return queue;
   }
 
-  function moveTo(child, jobs, authorId) {
+  function moveTo(child, jobs, reply) {
     let moved = 0;
     for (const job of jobs) moved += moveJob.run(child.id, job, child.id).changes;
     if (!moved) return;
     listsChanged();
-    logMessage(authorId, `📚 방금 넣은 숙제 ${moved}개를 ${child.name} 숙제로 옮겼어요.`);
+    reply(`📚 방금 넣은 숙제 ${moved}개를 ${child.name} 숙제로 옮겼어요.`);
     notify([child.id], { title: `📚 새 숙제 ${moved}개`, body: '숙제 탭에서 확인하세요.', url: '/#/homework', tag: `homework-move-${jobs[0]}` });
   }
 
-  async function run(job, text, authorId, child) {
+  async function run(job, text, authorId, child, reply) {
     const assigneeId = child?.id ?? null;
     let items;
     let fallback = false;
@@ -270,14 +272,14 @@ export function createHomework({ db, authors, children, assignee, extract, now, 
       added.push({ text: itemText, due });
     }
     if (!added.length) {
-      if (items.length) logMessage(authorId, '📚 이미 숙제 목록에 있는 내용이에요.');
-      else logMessage(authorId, '📚 숙제 항목을 찾지 못했어요. 목록에 직접 적어 주세요.');
+      if (items.length) reply('📚 이미 숙제 목록에 있는 내용이에요.');
+      else reply('📚 숙제 항목을 찾지 못했어요. 목록에 직접 적어 주세요.');
       return added;
     }
     listsChanged();
     const lines = added.map((i) => `• ${i.text}${i.due ? ` (~${Number(i.due.slice(5, 7))}/${Number(i.due.slice(8))})` : ''}`);
     const whose = child ? `${child.name} ` : '';
-    logMessage(authorId, `📚 ${whose}숙제 ${added.length}개를 목록에 넣었어요${fallback ? ' (원문 그대로)' : ''}\n${lines.join('\n')}`);
+    reply(`📚 ${whose}숙제 ${added.length}개를 목록에 넣었어요${fallback ? ' (원문 그대로)' : ''}\n${lines.join('\n')}`);
     if (assigneeId) {
       notify([assigneeId], { title: `📚 새 숙제 ${added.length}개`, body: added.map((i) => i.text).join(', '), url: '/#/homework', tag: `homework-${job}` });
     }
