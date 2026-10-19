@@ -372,9 +372,12 @@ export function createServer({
   app.use(
     express.static(WEB_DIR, {
       setHeaders: (res, file) => {
-        // Games are edited in place on the server PC, so they're never cached either.
-        if (/(index\.html|sw\.js|\.webmanifest)$/.test(file) || file.includes(`${path.sep}games${path.sep}`)) {
-          res.set('Cache-Control', 'no-cache');
+        // Games are edited in place on the server PC, so they're never cached either. The app's
+        // scripts and styles neither: Cloudflare tells browsers to keep them for 4 hours unless they're
+        // marked private (plain no-cache isn't enough), so an update wouldn't show. Browsers still
+        // reuse an unchanged file (ETag), they just check first.
+        if (/(index\.html|sw\.js|\.webmanifest|\.js|\.css)$/.test(file) || file.includes(`${path.sep}games${path.sep}`)) {
+          res.set('Cache-Control', 'private, no-cache');
         }
       },
     }),
