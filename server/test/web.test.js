@@ -65,7 +65,7 @@ test('serves the web app', async () => {
   const page = await call('GET', '/');
   assert.equal(page.status, 200);
   assert.match(page.data, /<html/);
-  assert.equal(page.headers.get('cache-control'), 'no-cache');
+  assert.equal(page.headers.get('cache-control'), 'private, no-cache');
   assert.equal((await call('GET', '/sw.js')).status, 200);
   assert.equal((await call('GET', '/vendor/preact-htm.js')).status, 200);
 });
