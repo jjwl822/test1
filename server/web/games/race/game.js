@@ -26,7 +26,13 @@ const durLabel = (sec) => (sec < 120 ? '1분 30초' : sec < 200 ? '2분 30초' :
 
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+// Quality steps: 2 = sharp + shadows, 1 = softer pixels + shadows, 0 = softer pixels, no shadows.
+// Starts high and steps down by itself if the phone can't keep up; remembered for next time.
+let quality = Number(localStorage.getItem('race.quality') ?? 2);
+const PIXEL_RATIO = [1.1, 1.25, 1.75];
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, PIXEL_RATIO[quality]));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const camera = new THREE.PerspectiveCamera(70, 1, 0.3, 4000);
 const garage = createGarage();
 const garageCam = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
@@ -608,6 +614,7 @@ function beginRace(m, spectate) {
     if (info.id === S.me && !spectate) R.mine = r;
     R.racers.set(r.id, r);
   }
+  world.setShadows(quality >= 1);
   setupMinimap();
   $('lobby').hidden = true;
   $('hud').hidden = false;
@@ -882,8 +889,33 @@ function updateRace(dt) {
 
   placeCamera(false, dt);
   R.world.scene.userData.cameraPos = camera.position;
+  R.world.follow(camLook.x, camLook.y, camLook.z);
+  watchSpeed(dt);
   R.world.update(dt, R.t);
   updateHud(now, raceMs);
+}
+
+// Frame-rate watch during a race: two slow seconds in a row → one quality step down.
+const perf = { time: 0, frames: 0, slow: 0 };
+function watchSpeed(dt) {
+  perf.time += dt;
+  perf.frames++;
+  if (perf.time < 2) return;
+  const fps = perf.frames / perf.time;
+  perf.time = 0;
+  perf.frames = 0;
+  perf.slow = fps < 38 ? perf.slow + 1 : 0;
+  if (perf.slow >= 2 && quality > 0) {
+    perf.slow = 0;
+    setQuality(quality - 1);
+  }
+}
+function setQuality(q) {
+  quality = q;
+  localStorage.setItem('race.quality', String(q));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, PIXEL_RATIO[q]));
+  resize();
+  R?.world.setShadows(q >= 1);
 }
 
 function updateHud(now, raceMs) {

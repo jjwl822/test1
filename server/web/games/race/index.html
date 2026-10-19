@@ -78,6 +78,7 @@
     #toast.show { opacity: 1; }
     #watch { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 50px); transform: translateX(-50%); background: rgba(0,0,0,.55);
       border-radius: 12px; padding: 8px 14px; font-size: 14px; text-align: center; }
+    #vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(30,20,50,.28) 100%); }
     #boostFx { position: absolute; inset: 0; opacity: 0; transition: opacity .2s;
       background: repeating-conic-gradient(from 0deg at 50% 55%, rgba(255,255,255,.22) 0deg 1.2deg, transparent 1.2deg 9deg);
       -webkit-mask: radial-gradient(circle at 50% 55%, transparent 32%, #000 75%); mask: radial-gradient(circle at 50% 55%, transparent 32%, #000 75%); }
@@ -143,6 +144,7 @@
   </div>
 
   <div id="hud" hidden>
+    <div id="vignette"></div>
     <div id="boostFx"></div>
     <div class="tl"><div id="rank">1<small>/1</small></div><div id="lap">LAP 1/3</div></div>
     <div id="clock">0:00.00</div>
