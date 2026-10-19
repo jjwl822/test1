@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 
-/** The shared shopping list and to-do list. Changes from anyone show up for everyone right away. */
+/** The shared shopping, to-do and homework lists. Changes from anyone show up for everyone right away. */
 class ListsViewModel(application: Application) : AndroidViewModel(application) {
     data class State(
         val items: List<ListItem> = emptyList(),
@@ -35,8 +35,8 @@ class ListsViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refresh() = action { _state.value = _state.value.copy(items = app.api.listItems(), loading = false) }
 
-    fun add(list: String, text: String) = action {
-        app.api.addListItem(list, text)
+    fun add(list: String, text: String, due: String? = null) = action {
+        app.api.addListItem(list, text, due)
         refresh()
     }
 
@@ -58,6 +58,9 @@ class ListsViewModel(application: Application) : AndroidViewModel(application) {
         app.api.clearDoneItems(list)
         refresh()
     }
+
+    /** The chat messages a homework item came from. */
+    suspend fun source(item: ListItem) = app.api.listItemSource(item.id).messages
 
     private fun action(block: suspend () -> Unit) = viewModelScope.launch {
         try {

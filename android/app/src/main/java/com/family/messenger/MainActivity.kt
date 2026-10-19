@@ -137,6 +137,10 @@ private fun App(app: FamilyApp, pendingChat: MutableStateFlow<Pair<String, Strin
                     chatId = null
                     tab = TAB_CALENDAR
                 }
+                MessageBus.LISTS -> {
+                    chatId = null
+                    tab = TAB_LISTS
+                }
                 else -> {
                     chatId = target.first
                     chatTitle = target.second

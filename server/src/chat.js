@@ -28,7 +28,7 @@ export function participants(db, conversationId) {
  * Conversations (family group + 1:1), messages with replies, emoji reactions, polls and
  * deletion, and read receipts.
  */
-export function registerChatRoutes(app, { db, auth, broadcast, saveFile, removeFiles, imageTypes, notify }) {
+export function registerChatRoutes(app, { db, auth, broadcast, saveFile, removeFiles, imageTypes, notify, onText }) {
   const MESSAGE_SELECT = `
     SELECT m.*, u.display_name AS sender_name
     FROM messages m JOIN users u ON u.id = m.sender_id`;
@@ -191,7 +191,9 @@ export function registerChatRoutes(app, { db, auth, broadcast, saveFile, removeF
     if (text.length > MAX_TEXT) return res.status(400).json({ error: '메시지가 너무 깁니다.' });
     const reply = replyTarget(req.params.id, req.body?.replyTo);
     if (reply.error) return res.status(400).json({ error: reply.error });
-    res.status(201).json(saveMessage(req.params.id, req.user.id, 'text', text, null, reply.id, req.participants));
+    const message = saveMessage(req.params.id, req.user.id, 'text', text, null, reply.id, req.participants);
+    res.status(201).json(message);
+    onText?.(message);
   });
 
   app.post(

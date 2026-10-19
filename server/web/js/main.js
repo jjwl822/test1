@@ -127,7 +127,7 @@ function App() {
         const group = m.conversationId === 'family';
         toast(group ? '우리 가족' : m.senderName, `${group ? `${m.senderName}: ` : ''}${preview(m)}`, () => go(`/chat/${m.conversationId}`));
       } else if (type === 'reminder') {
-        toast(data.title, data.text, () => go(data.target === 'feed' ? '/story' : '/calendar'));
+        toast(data.title, data.text, () => go({ feed: '/story', lists: '/lists' }[data.target] ?? '/calendar'));
       } else if (type === 'post' && data.authorId !== me.id && here.name !== 'story') {
         toast('가족 스토리', `${data.authorName}님이 새 스토리를 올렸어요`, () => go('/story'));
       }

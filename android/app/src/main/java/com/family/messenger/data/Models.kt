@@ -96,7 +96,7 @@ data class CalendarEvent(
 @Serializable
 data class ListItem(
     val id: Long,
-    /** "shopping" or "todo" */
+    /** "shopping", "todo" or "homework" */
     val list: String,
     val text: String,
     val done: Boolean,
@@ -105,7 +105,18 @@ data class ListItem(
     val doneByName: String? = null,
     val createdAt: Long,
     val doneAt: Long? = null,
+    /** Homework due date, YYYY-MM-DD. */
+    val due: String? = null,
+    val assigneeName: String? = null,
+    /** Taken from a notice in the family chat ([Api.listItemSource]). */
+    val fromChat: Boolean = false,
 )
+
+@Serializable
+data class SourceMessage(val id: Long, val text: String? = null, val senderName: String, val createdAt: Long)
+
+@Serializable
+data class ListItemSource(val messages: List<SourceMessage>)
 
 @Serializable
 data class Conversation(

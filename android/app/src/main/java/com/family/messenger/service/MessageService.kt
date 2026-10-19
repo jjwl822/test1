@@ -127,7 +127,11 @@ class MessageService : Service() {
                     context,
                     event.title.orEmpty(),
                     event.text.orEmpty(),
-                    if (event.target == "feed") MessageBus.FEED else MessageBus.CALENDAR,
+                    when (event.target) {
+                        "feed" -> MessageBus.FEED
+                        "lists" -> MessageBus.LISTS
+                        else -> MessageBus.CALENDAR
+                    },
                 )
                 "post", "comment", "feed" -> {
                     val postId = event.postId ?: return

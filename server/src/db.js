@@ -135,13 +135,25 @@ export function openDatabase(file) {
     -- Shared shopping list and to-do list.
     CREATE TABLE IF NOT EXISTS list_items (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      list       TEXT NOT NULL CHECK (list IN ('shopping', 'todo')),
+      list       TEXT NOT NULL CHECK (list IN ('shopping', 'todo', 'homework')),
       text       TEXT NOT NULL,
       done       INTEGER NOT NULL DEFAULT 0,
       author_id  INTEGER NOT NULL REFERENCES users(id),
       done_by    INTEGER REFERENCES users(id),
       created_at INTEGER NOT NULL,
-      done_at    INTEGER
+      done_at    INTEGER,
+      -- 📚 homework: due date, who it's for, and the chat notice it came from
+      due         TEXT,
+      assignee_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      source_job  INTEGER,
+      dedupe      TEXT
+    );
+
+    -- Chat messages already turned into homework items (job = first message of the notice).
+    CREATE TABLE IF NOT EXISTS homework_sources (
+      message_id INTEGER PRIMARY KEY,
+      job        INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
     );
   `);
   return db;
@@ -177,6 +189,35 @@ function migrate(db) {
       DROP TABLE messages;
       ALTER TABLE messages_new RENAME TO messages;
       CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id);
+      COMMIT;
+      PRAGMA foreign_keys = ON;
+    `);
+  }
+
+  // Same for list_items, to add the 📚 homework list.
+  const lists = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'list_items'").get();
+  if (lists && !lists.sql.includes("'homework'")) {
+    db.exec(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN;
+      CREATE TABLE list_items_new (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        list        TEXT NOT NULL CHECK (list IN ('shopping', 'todo', 'homework')),
+        text        TEXT NOT NULL,
+        done        INTEGER NOT NULL DEFAULT 0,
+        author_id   INTEGER NOT NULL REFERENCES users(id),
+        done_by     INTEGER REFERENCES users(id),
+        created_at  INTEGER NOT NULL,
+        done_at     INTEGER,
+        due         TEXT,
+        assignee_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        source_job  INTEGER,
+        dedupe      TEXT
+      );
+      INSERT INTO list_items_new (id, list, text, done, author_id, done_by, created_at, done_at)
+        SELECT id, list, text, done, author_id, done_by, created_at, done_at FROM list_items;
+      DROP TABLE list_items;
+      ALTER TABLE list_items_new RENAME TO list_items;
       COMMIT;
       PRAGMA foreign_keys = ON;
     `);

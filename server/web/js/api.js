@@ -84,7 +84,9 @@ export const api = {
   deleteEvent: (id) => del(`/api/events/${id}`),
 
   listItems: () => get('/api/lists/items'),
-  addItem: (list, text) => post('/api/lists/items', { list, text }),
+  addItem: (list, text, due) => post('/api/lists/items', { list, text, due }),
+  setItemDue: (id, due) => patch(`/api/lists/items/${id}`, { due }),
+  itemSource: (id) => get(`/api/lists/items/${id}/source`),
   setItemDone: (id, done) => patch(`/api/lists/items/${id}`, { done }),
   deleteItem: (id) => del(`/api/lists/items/${id}`),
   clearDone: (list) => post(`/api/lists/${list}/clear-done`),

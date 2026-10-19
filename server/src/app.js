@@ -7,8 +7,9 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { openDatabase } from './db.js';
 import { createCalls } from './calls.js';
-import { participants, registerChatRoutes } from './chat.js';
+import { GROUP_ID, participants, registerChatRoutes } from './chat.js';
 import { registerFamilyRoutes } from './family.js';
+import { createHomework } from './homework.js';
 import { registerFeedRoutes } from './feed.js';
 import { registerGameRoutes } from './games.js';
 import { createPush } from './push.js';
@@ -94,6 +95,8 @@ export function createServer({
   turn,
   fetchImpl,
   ringSeconds,
+  // { authors: ['mom'], assignee: 'kid', extract(text, today) } — homework notices from chat → 📚 list
+  homework,
 }) {
   if (!familyCode) throw new Error('familyCode is required');
   const uploadDir = path.join(dataDir, 'uploads');
@@ -301,7 +304,17 @@ export function createServer({
   });
 
   const notify = (userIds, payload) => push.notify(userIds, payload).catch((err) => console.warn(err));
-  const chat = registerChatRoutes(app, { db, auth, broadcast, saveFile, removeFiles, imageTypes: IMAGE_TYPES, notify });
+  let homeworkBot = null;
+  const chat = registerChatRoutes(app, {
+    db,
+    auth,
+    broadcast,
+    saveFile,
+    removeFiles,
+    imageTypes: IMAGE_TYPES,
+    notify,
+    onText: (message) => homeworkBot?.onMessage(message),
+  });
   const calls = createCalls({
     db,
     auth,
@@ -325,7 +338,22 @@ export function createServer({
     notify,
     now,
     reminderHour,
+    homeworkFor: homework?.assignee,
   });
+  if (homework?.extract && homework.authors?.length) {
+    const everyone = () => db.prepare('SELECT id FROM users').all().map((r) => r.id);
+    homeworkBot = createHomework({
+      db,
+      authors: homework.authors,
+      assignee: homework.assignee,
+      extract: homework.extract,
+      now,
+      listsChanged: family.listsChanged,
+      notify,
+      // Shown in the family chat as a quiet line from the parent (like the 📞 call records).
+      logMessage: (senderId, text) => chat.logMessage(GROUP_ID, senderId, text, everyone(), { silent: true }),
+    });
+  }
 
   // TEMP: which phones load which game pages (debugging blank games in the Android app).
   app.use('/games', (req, res, next) => {
@@ -418,6 +446,8 @@ export function createServer({
     for (const ws of wss.clients) ws.terminate();
     db.close();
   });
+  /** Resolves when homework notices sent so far have been turned into list items (for tests). */
+  server.homeworkIdle = () => homeworkBot?.idle() ?? Promise.resolve();
 
   return server;
 }

@@ -1,6 +1,6 @@
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
-const LISTS = ['shopping', 'todo'];
+const LISTS = ['shopping', 'todo', 'homework'];
 
 const pad = (n) => String(n).padStart(2, '0');
 /** YYYY-MM-DD in the server's local time zone. */
@@ -15,9 +15,9 @@ function validDate(value) {
 
 /**
  * Family calendar (with day-before and same-day reminders), "1년 전 오늘" memory reminders,
- * and the shared shopping / to-do lists.
+ * and the shared shopping / to-do / homework lists.
  */
-export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, connectedUserIds, notify, now, reminderHour }) {
+export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, connectedUserIds, notify, now, reminderHour, homeworkFor }) {
   // ---- Calendar -------------------------------------------------------------------------------
 
   const EVENT_SELECT = `
@@ -93,6 +93,9 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
     SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM posts
     WHERE strftime('%m-%d', created_at / 1000, 'unixepoch', 'localtime') = ?
       AND strftime('%Y', created_at / 1000, 'unixepoch', 'localtime') < ?`);
+  const homeworkDue = db.prepare(
+    "SELECT id, text, due, assignee_id, author_id FROM list_items WHERE list = 'homework' AND done = 0 AND due IN (?, ?)",
+  );
   const wasSent = db.prepare('SELECT 1 FROM reminders_sent WHERE key = ?');
   const markSent = db.prepare('INSERT OR IGNORE INTO reminders_sent (key, sent_at) VALUES (?, ?)');
 
@@ -110,6 +113,16 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
     for (const e of eventsOn(localDate(tomorrow))) {
       reminders.push({ key: `event:${e.id}:${day}:tomorrow`, target: 'calendar', title: '내일 일정', text: label(e) });
     }
+    for (const h of homeworkDue.all(day, localDate(tomorrow))) {
+      const when = h.due === day ? '오늘' : '내일';
+      reminders.push({
+        key: `homework:${h.id}:${h.due}:${when}`,
+        target: 'lists',
+        title: `📚 ${when}까지 할 숙제`,
+        text: h.text,
+        userIds: [h.assignee_id ?? h.author_id],
+      });
+    }
     const memories = memoryCount.get(day.slice(5), day.slice(0, 4));
     if (memories.n > 0) {
       const years = today.getFullYear() - new Date(memories.oldest).getFullYear();
@@ -126,11 +139,12 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
   /** Sends anything due to a person (connected phone, or web push) who hasn't had it yet. */
   function remind(userId) {
     for (const r of dueReminders()) {
+      if (r.userIds && !r.userIds.includes(userId)) continue;
       const key = `${r.key}:user:${userId}`;
       if (wasSent.get(key)) continue;
       markSent.run(key, Date.now());
       sendTo(userId, { type: 'reminder', target: r.target, title: r.title, text: r.text });
-      notify([userId], { title: r.title, body: r.text, url: r.target === 'feed' ? '/#/story' : '/#/calendar', tag: r.key });
+      notify([userId], { title: r.title, body: r.text, url: { feed: '/#/story', lists: '/#/lists' }[r.target] ?? '/#/calendar', tag: r.key });
     }
   }
 
@@ -141,8 +155,9 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
   // ---- Shared lists ---------------------------------------------------------------------------
 
   const ITEM_SELECT = `
-    SELECT i.*, a.display_name AS author_name, d.display_name AS done_by_name
-    FROM list_items i JOIN users a ON a.id = i.author_id LEFT JOIN users d ON d.id = i.done_by`;
+    SELECT i.*, a.display_name AS author_name, d.display_name AS done_by_name, s.display_name AS assignee_name
+    FROM list_items i JOIN users a ON a.id = i.author_id LEFT JOIN users d ON d.id = i.done_by
+      LEFT JOIN users s ON s.id = i.assignee_id`;
   const toItem = (row) => ({
     id: row.id,
     list: row.list,
@@ -153,10 +168,20 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
     doneByName: row.done_by_name ?? null,
     createdAt: row.created_at,
     doneAt: row.done_at ?? null,
+    due: row.due ?? null,
+    assigneeId: row.assignee_id ?? null,
+    assigneeName: row.assignee_name ?? null,
+    // Taken from a chat notice (GET /api/lists/items/:id/source shows it)
+    fromChat: row.source_job != null,
   });
   const itemById = db.prepare(`${ITEM_SELECT} WHERE i.id = ?`);
   const listsChanged = () => broadcastAll({ type: 'lists' });
+  /** Who homework is for (data/config.json homework.assignee), if that person exists. */
+  const homeworkAssignee = () =>
+    (homeworkFor && db.prepare('SELECT id FROM users WHERE username = ?').get(homeworkFor)?.id) ?? null;
   const itemText = (value) => (typeof value === 'string' ? value.trim() : '');
+  /** undefined: not given, null: cleared, 'YYYY-MM-DD', or false when invalid. */
+  const dueDate = (value) => (value === undefined ? undefined : value === null || value === '' ? null : validDate(value) ? value : false);
 
   app.get('/api/lists/items', auth, (_req, res) => {
     res.json(db.prepare(`${ITEM_SELECT} ORDER BY i.done, i.id DESC`).all().map(toItem));
@@ -166,14 +191,16 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
     const text = itemText(req.body?.text);
     if (!LISTS.includes(req.body?.list)) return res.status(400).json({ error: '잘못된 목록입니다.' });
     if (!text || text.length > 200) return res.status(400).json({ error: '내용을 입력하세요.' });
+    const due = dueDate(req.body?.due);
+    if (due === false) return res.status(400).json({ error: '날짜가 올바르지 않습니다.' });
     const { lastInsertRowid } = db
-      .prepare('INSERT INTO list_items (list, text, author_id, created_at) VALUES (?, ?, ?, ?)')
-      .run(req.body.list, text, req.user.id, Date.now());
+      .prepare('INSERT INTO list_items (list, text, author_id, created_at, due, assignee_id) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(req.body.list, text, req.user.id, Date.now(), due ?? null, req.body.list === 'homework' ? homeworkAssignee() : null);
     listsChanged();
     res.status(201).json(toItem(itemById.get(lastInsertRowid)));
   });
 
-  // Body: { done?: boolean, text?: string }
+  // Body: { done?: boolean, text?: string, due?: 'YYYY-MM-DD' | null }
   app.patch('/api/lists/items/:id', auth, (req, res) => {
     const id = Number(req.params.id) || 0;
     if (!itemById.get(id)) return res.status(404).json({ error: '항목을 찾을 수 없습니다.' });
@@ -190,8 +217,26 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
       if (!text || text.length > 200) return res.status(400).json({ error: '내용을 입력하세요.' });
       db.prepare('UPDATE list_items SET text = ? WHERE id = ?').run(text, id);
     }
+    const due = dueDate(req.body?.due);
+    if (due === false) return res.status(400).json({ error: '날짜가 올바르지 않습니다.' });
+    if (due !== undefined) db.prepare('UPDATE list_items SET due = ? WHERE id = ?').run(due, id);
     listsChanged();
     res.json(toItem(itemById.get(id)));
+  });
+
+  // The chat messages a homework item was taken from.
+  app.get('/api/lists/items/:id/source', auth, (req, res) => {
+    const item = itemById.get(Number(req.params.id) || 0);
+    if (!item?.source_job) return res.status(404).json({ error: '원본을 찾을 수 없습니다.' });
+    const messages = db
+      .prepare(
+        `SELECT m.id, m.text, m.created_at, u.display_name AS sender_name FROM homework_sources h
+         JOIN messages m ON m.id = h.message_id JOIN users u ON u.id = m.sender_id
+         WHERE h.job = ? AND m.deleted = 0 ORDER BY m.id`,
+      )
+      .all(item.source_job)
+      .map((m) => ({ id: m.id, text: m.text, senderName: m.sender_name, createdAt: m.created_at }));
+    res.json({ messages });
   });
 
   app.delete('/api/lists/items/:id', auth, (req, res) => {
@@ -210,6 +255,7 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
 
   return {
     remind,
+    listsChanged,
     stop: () => clearInterval(timer),
   };
 }

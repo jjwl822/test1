@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { createServer } from './app.js';
+import { claudeExtractor } from './homework.js';
 
 const port = Number(process.env.PORT) || 3000;
 const dataDir = path.resolve(process.env.DATA_DIR || 'data');
@@ -54,7 +55,12 @@ const turn = {
   keyId: process.env.TURN_KEY_ID || config.turnKeyId,
   token: process.env.TURN_KEY_API_TOKEN || config.turnKeyToken,
 };
-createServer({ familyCode: code, dataDir, reminderHour, turn }).listen(port, () => {
+// Homework notices in the family chat → 📚 list (optional), using Claude Code signed in on this PC:
+// data/config.json { "homework": { "authors": ["mom"], "assignee": "kid", "model": "sonnet", "effort": "medium" } }
+const homework = config.homework?.authors?.length
+  ? { authors: config.homework.authors, assignee: config.homework.assignee, extract: claudeExtractor(config.homework) }
+  : undefined;
+createServer({ familyCode: code, dataDir, reminderHour, turn, homework }).listen(port, () => {
   const addresses = lanAddresses();
   console.log('========================================');
   console.log(' 가족 메신저 서버가 켜졌습니다');
@@ -68,6 +74,7 @@ createServer({ familyCode: code, dataDir, reminderHour, turn }).listen(port, () 
   console.log(` 가족 코드: ${code}`);
   console.log(` 데이터 저장 위치: ${dataDir}`);
   console.log(` 통화 중계(Cloudflare TURN): ${turn.keyId && turn.token ? '켜짐' : '꺼짐 (같은 와이파이 등 직접 연결만)'}`);
+  console.log(` 숙제 자동 등록: ${homework ? `켜짐 (${homework.authors.join(', ')} → ${homework.assignee ?? '-'})` : '꺼짐'}`);
   console.log(' 이 창을 닫으면 서버가 꺼집니다.');
   console.log('========================================');
 });
