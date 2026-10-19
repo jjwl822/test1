@@ -12,6 +12,7 @@ import { registerFamilyRoutes } from './family.js';
 import { createHomework } from './homework.js';
 import { registerFeedRoutes } from './feed.js';
 import { registerGameRoutes } from './games.js';
+import { createRace, registerRaceRoutes } from './race.js';
 import { createPush } from './push.js';
 
 export { GROUP_ID } from './chat.js';
@@ -330,6 +331,8 @@ export function createServer({
   });
   registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes: Object.keys(MEDIA_TYPES), now, notify });
   registerGameRoutes(app, { db, auth, gamesDir, errorLog: path.join(dataDir, 'game-errors.log') });
+  const race = createRace({ db });
+  registerRaceRoutes(app, { auth, race });
   const family = registerFamilyRoutes(app, {
     db,
     auth,
@@ -392,14 +395,19 @@ export function createServer({
 
   const server = http.createServer(app);
   const wss = new WebSocketServer({ noServer: true });
+  const raceWss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
 
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://localhost');
     const token = tokenFrom(req) ?? url.searchParams.get('token');
-    const user = url.pathname === '/ws' ? userForToken(token) : null;
+    const user = url.pathname === '/ws' || url.pathname === '/ws/race' ? userForToken(token) : null;
     if (!user) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
+      return;
+    }
+    if (url.pathname === '/ws/race') {
+      raceWss.handleUpgrade(req, socket, head, (ws) => race.connect(ws, user));
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -449,6 +457,7 @@ export function createServer({
     family.stop();
     homeworkBot?.stop();
     calls.stop();
+    race.stop();
     for (const ws of wss.clients) ws.terminate();
     db.close();
   });

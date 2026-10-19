@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ko">
+<head><script src="/games/wv-fix.js?v=3"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>가족 레이스</title>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: #12162a; color: #fff; overflow: hidden; overscroll-behavior: none; touch-action: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; user-select: none; -webkit-user-select: none; }
+    html.wvfix body { height: var(--app-h); }
+    #view { position: fixed; left: 0; top: 0; display: block; }
+    button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+    [hidden] { display: none !important; }
+
+    /* Lobby */
+    #lobby { position: fixed; inset: 0; height: var(--app-h, 100%); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 10px;
+      padding: calc(env(safe-area-inset-top) + 10px) calc(env(safe-area-inset-right) + 10px) calc(env(safe-area-inset-bottom) + 10px) calc(env(safe-area-inset-left) + 10px); }
+    .col { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+    header { display: flex; align-items: center; gap: 10px; }
+    h1 { margin: 0; font-size: 22px; }
+    #conn { font-size: 12px; opacity: .7; }
+    #mute { margin-left: auto; background: rgba(255,255,255,.12); border-radius: 999px; width: 36px; height: 36px; font-size: 18px; }
+    #preview { flex: 1; min-height: 110px; border-radius: 16px; }
+    .card { background: rgba(255,255,255,.08); border-radius: 14px; padding: 8px 10px; }
+    .car-pick { display: flex; align-items: center; gap: 8px; }
+    .car-pick > button { width: 44px; height: 44px; border-radius: 12px; background: rgba(255,255,255,.14); font-size: 18px; flex: none; }
+    .car-pick .info { flex: 1; min-width: 0; text-align: center; }
+    #carName { font-size: 17px; font-weight: 800; }
+    .bars { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; font-size: 11px; align-items: center; margin-top: 4px; text-align: left; }
+    .bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.15); overflow: hidden; }
+    .bar i { display: block; height: 100%; background: linear-gradient(90deg, #40c4ff, #7c4dff); }
+    #players { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+    #players li { background: rgba(255,255,255,.1); border-radius: 999px; padding: 5px 10px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+    #players li.ready { background: rgba(76,175,80,.35); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+    #tracks { flex: 1; overflow-y: auto; min-height: 0; touch-action: pan-y; display: flex; flex-direction: column; gap: 6px; padding-right: 2px; }
+    .group { font-size: 12px; opacity: .7; margin: 4px 2px 0; }
+    .track { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,.08); border-radius: 12px; padding: 8px 10px; text-align: left; width: 100%; }
+    .track.on { background: linear-gradient(90deg, #7c4dff, #448aff); }
+    .track .em { font-size: 26px; flex: none; }
+    .track .nm { font-weight: 700; }
+    .track .sub { font-size: 12px; opacity: .75; display: block; margin-top: 1px; }
+    .track .best { margin-left: auto; font-size: 12px; text-align: right; white-space: nowrap; opacity: .9; }
+    .locked .track:not(.on) { opacity: .55; }
+    .row { display: flex; align-items: center; gap: 10px; }
+    .row button { width: 36px; height: 36px; border-radius: 10px; background: rgba(255,255,255,.14); font-size: 18px; }
+    .row b { min-width: 20px; text-align: center; font-size: 18px; }
+    #go { height: 52px; border-radius: 16px; font-size: 19px; font-weight: 800; background: linear-gradient(90deg, #ff4081, #ff9100); box-shadow: 0 4px 16px rgba(255,64,129,.4); }
+    #go:disabled { background: rgba(255,255,255,.15); box-shadow: none; font-size: 15px; }
+    #go.ready { background: linear-gradient(90deg, #43a047, #00c853); }
+    #lobbyNote { margin: 0; font-size: 12px; opacity: .75; text-align: center; min-height: 1em; }
+    @media (orientation: portrait) {
+      #lobby { grid-template-columns: 1fr; grid-template-rows: auto auto; overflow-y: auto; touch-action: pan-y; align-content: start; }
+      #preview { flex: none; height: 30vh; }
+      #tracks { overflow: visible; flex: none; }
+      .col { min-height: auto; }
+    }
+
+    /* Race HUD */
+    #hud { position: fixed; inset: 0; height: var(--app-h, 100%); pointer-events: none; }
+    #hud .tl { position: absolute; left: calc(env(safe-area-inset-left) + 12px); top: calc(env(safe-area-inset-top) + 8px); text-shadow: 0 2px 6px rgba(0,0,0,.6); }
+    #rank { font-size: 46px; font-weight: 900; font-style: italic; line-height: 1; }
+    #rank small { font-size: 20px; opacity: .85; }
+    #lap { font-size: 16px; font-weight: 800; margin-top: 2px; }
+    #clock { position: absolute; left: 50%; top: calc(env(safe-area-inset-top) + 8px); transform: translateX(-50%); font-size: 20px; font-weight: 800;
+      font-variant-numeric: tabular-nums; background: rgba(0,0,0,.35); border-radius: 10px; padding: 3px 10px; }
+    #minimap { position: absolute; right: calc(env(safe-area-inset-right) + 10px); top: calc(env(safe-area-inset-top) + 8px); width: 120px; height: 120px;
+      background: rgba(0,0,0,.3); border-radius: 14px; }
+    #speed { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 10px); transform: translateX(-50%); font-size: 26px; font-weight: 900;
+      font-style: italic; text-shadow: 0 2px 6px rgba(0,0,0,.6); font-variant-numeric: tabular-nums; }
+    #speed small { font-size: 13px; }
+    #big { position: absolute; left: 0; right: 0; top: 30%; text-align: center; font-size: 72px; font-weight: 900; font-style: italic;
+      text-shadow: 0 4px 14px rgba(0,0,0,.6); transition: transform .15s; }
+    #big.small { font-size: 34px; }
+    #toast { position: absolute; left: 50%; top: calc(env(safe-area-inset-top) + 46px); transform: translateX(-50%); background: rgba(0,0,0,.55);
+      border-radius: 999px; padding: 6px 14px; font-size: 14px; white-space: nowrap; opacity: 0; transition: opacity .3s; }
+    #toast.show { opacity: 1; }
+    #watch { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 50px); transform: translateX(-50%); background: rgba(0,0,0,.55);
+      border-radius: 12px; padding: 8px 14px; font-size: 14px; text-align: center; }
+    #boostFx { position: absolute; inset: 0; opacity: 0; transition: opacity .2s;
+      background: repeating-conic-gradient(from 0deg at 50% 55%, rgba(255,255,255,.22) 0deg 1.2deg, transparent 1.2deg 9deg);
+      -webkit-mask: radial-gradient(circle at 50% 55%, transparent 32%, #000 75%); mask: radial-gradient(circle at 50% 55%, transparent 32%, #000 75%); }
+    #boostFx.on { opacity: 1; animation: spin 0.25s linear infinite; }
+    @keyframes spin { to { transform: rotate(3deg); } }
+    #quit { position: absolute; right: calc(env(safe-area-inset-right) + 140px); top: calc(env(safe-area-inset-top) + 8px); pointer-events: auto;
+      background: rgba(0,0,0,.35); border-radius: 10px; width: 38px; height: 34px; font-size: 16px; }
+
+    /* Touch controls */
+    #controls { position: fixed; inset: 0; height: var(--app-h, 100%); pointer-events: none; }
+    #controls .pad { position: absolute; bottom: calc(env(safe-area-inset-bottom) + 14px); display: flex; gap: 12px; align-items: flex-end; pointer-events: auto; }
+    #controls .pl { left: calc(env(safe-area-inset-left) + 14px); }
+    #controls .pr { right: calc(env(safe-area-inset-right) + 14px); }
+    #controls button { width: 82px; height: 82px; border-radius: 50%; background: rgba(255,255,255,.2); border: 2px solid rgba(255,255,255,.35);
+      font-size: 30px; font-weight: 800; backdrop-filter: blur(2px); }
+    #controls button.on { background: rgba(255,255,255,.45); }
+    #controls .drift { font-size: 15px; background: rgba(124,77,255,.4); }
+    #controls .item { position: relative; background: rgba(255,145,0,.4); }
+    #controls .item.empty { opacity: .45; }
+    #controls .item span { position: absolute; right: 4px; top: 2px; font-size: 14px; background: #ff4081; border-radius: 999px; min-width: 22px; height: 22px; line-height: 22px; }
+    #controls .brake { width: 62px; height: 62px; font-size: 12px; white-space: nowrap; letter-spacing: -0.5px; }
+    .col2 { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+    @media (orientation: portrait) { #controls button { width: 72px; height: 72px; } }
+
+    /* Results */
+    #results { position: fixed; inset: 0; height: var(--app-h, 100%); display: flex; align-items: center; justify-content: center; background: rgba(10,12,30,.6); padding: 12px; }
+    #results .panel { background: #1f2440; border-radius: 20px; padding: 16px 18px; width: 100%; max-width: 440px; max-height: 100%; overflow-y: auto; touch-action: pan-y; }
+    #results h2 { margin: 0 0 4px; text-align: center; }
+    #resultSub { text-align: center; opacity: .7; font-size: 13px; margin-bottom: 8px; }
+    #resultList { list-style: none; padding: 0; margin: 0 0 10px; }
+    #resultList li { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 1px solid rgba(255,255,255,.1); }
+    #resultList li.me { font-weight: 800; background: rgba(124,77,255,.25); border-radius: 8px; }
+    #resultList .rk { width: 30px; text-align: center; font-size: 18px; }
+    #resultList .nm { flex: 1; }
+    #resultList .tm { font-variant-numeric: tabular-nums; }
+    #newBest { text-align: center; color: #ffd740; font-weight: 800; margin-bottom: 8px; }
+    #back { width: 100%; height: 48px; border-radius: 14px; background: linear-gradient(90deg, #7c4dff, #448aff); font-size: 17px; font-weight: 800; }
+    #rotate { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 110px); transform: translateX(-50%); background: rgba(0,0,0,.55); border-radius: 999px;
+      padding: 6px 12px; font-size: 13px; pointer-events: none; }
+    @media (orientation: landscape) { #rotate { display: none; } }
+  </style>
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <div id="lobby">
+    <div class="col">
+      <header><h1>🏎️ 가족 레이스</h1><span id="conn">연결 중…</span><button id="mute" aria-label="소리">🔊</button></header>
+      <div id="preview"></div>
+      <div class="card car-pick">
+        <button id="prevCar" aria-label="이전 차">◀</button>
+        <div class="info"><div id="carName"></div><div class="bars" id="carStats"></div></div>
+        <button id="nextCar" aria-label="다음 차">▶</button>
+      </div>
+      <ul id="players"></ul>
+    </div>
+    <div class="col">
+      <div id="tracks"></div>
+      <div class="row card"><span style="flex:1">🤖 컴퓨터 차</span><button id="botsMinus">−</button><b id="bots">3</b><button id="botsPlus">＋</button></div>
+      <button id="go">출발!</button>
+      <p id="lobbyNote"></p>
+    </div>
+  </div>
+
+  <div id="hud" hidden>
+    <div id="boostFx"></div>
+    <div class="tl"><div id="rank">1<small>/1</small></div><div id="lap">LAP 1/3</div></div>
+    <div id="clock">0:00.00</div>
+    <button id="quit" aria-label="나가기">✕</button>
+    <canvas id="minimap"></canvas>
+    <div id="speed">0<small> km/h</small></div>
+    <div id="big"></div>
+    <div id="toast"></div>
+    <div id="watch" hidden>👀 레이스 구경 중이에요. 끝나면 같이 달려요!</div>
+  </div>
+
+  <div id="controls" hidden>
+    <div class="pad pl"><button data-k="left" aria-label="왼쪽">◀</button><button data-k="right" aria-label="오른쪽">▶</button></div>
+    <div class="pad pr">
+      <button data-k="brake" class="brake">브레이크</button>
+      <div class="col2">
+        <button data-k="item" class="item empty" aria-label="부스터">🚀<span id="itemCount" hidden></span></button>
+        <button data-k="drift" class="drift">드리프트</button>
+      </div>
+    </div>
+  </div>
+  <div id="rotate" hidden>📱 폰을 가로로 돌리면 더 잘 보여요</div>
+
+  <div id="results" hidden>
+    <div class="panel">
+      <h2 id="resultTitle">🏁 결과</h2>
+      <div id="resultSub"></div>
+      <div id="newBest" hidden>🎉 내 최고 기록!</div>
+      <ol id="resultList"></ol>
+      <button id="back">대기실로</button>
+    </div>
+  </div>
+
+  <script src="/games/family-games.js"></script>
+  <script type="module" src="./game.js"></script>
+</body>
+</html>

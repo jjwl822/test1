@@ -1,4 +1,5 @@
 [
+  { "id": "race", "title": "가족 레이스 3D", "emoji": "🏎️", "description": "각자 폰으로 같이 달리는 3D 카트 레이스! 차 8종, 트랙 10개, 부스터 아이템. 폰을 가로로 돌려서 해요.", "scores": false },
   { "id": "luo", "title": "루오와 재능 도둑", "emoji": "🗡️", "description": "잃어버린 재능을 되찾는 모험 RPG", "scores": false },
   { "id": "neon", "title": "네온 썸 (리듬게임)", "emoji": "🎶", "description": "양손 엄지로 떨어지는 노트를 박자에 맞춰 터치! 폰을 가로로 돌려서 해요.", "scoreOrder": "high", "scoreUnit": "점" },
   { "id": "records", "title": "가족 기록판", "emoji": "🏆", "description": "게임을 안 해도 모든 게임의 가족 순위와 최근 기록을 볼 수 있어요.", "scores": false },
