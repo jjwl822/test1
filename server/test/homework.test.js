@@ -123,6 +123,18 @@ test('"유호숙제" with the details in the next message, in a 1:1 chat', async
   assert.match(await lastLine(mom, room), /📚 숙제 1개를 목록에 넣었어요\n• \[유호\] 내일 영어시험/);
 });
 
+test('"과제" works like "숙제"', async () => {
+  const { mom, boy } = await setup();
+  const before = calls.length;
+  await say(mom, '유호숙제 말고 과제\n- 과학 탐구 보고서 쓰기');
+  await server.homeworkIdle();
+  assert.equal(calls.length, before + 1);
+  await say(mom, '방학 과제\n- 독서록 2편');
+  await server.homeworkIdle();
+  assert.equal(calls.length, before + 2);
+  assert.ok((await homework(boy)).some((i) => i.text === '과학 탐구 보고서 쓰기'));
+});
+
 test('📢 notices count, a notice pasted again is skipped, items are not added twice', async () => {
   const { mom, kid } = await setup();
   const before = calls.length;

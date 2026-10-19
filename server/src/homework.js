@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { localDate } from './family.js';
 
-// A parent's message with one of these is worth asking Claude about; nothing else is sent.
-const KEYWORD = /숙제/;
+// A parent's message with one of these words is worth asking Claude about; nothing else is sent.
+const KEYWORD = /숙제|과제/;
 const NOTICE = '📢';
 // Lines this module writes into the chat (in the parent's name), never read back as homework.
 const BOT = '📚 ';
@@ -146,7 +146,7 @@ export function homeworkPeople(db, { children, assignee } = {}) {
 /**
  * Puts homework that a parent mentions in any chat on the 📚 숙제 list.
  *
- * Only a parent's message containing "숙제" (or a pasted 📢 notice) starts it. Once the parent has
+ * Only a parent's message containing "숙제" or "과제" (or a pasted 📢 notice) starts it. Once the parent has
  * been quiet for a little while, that chat's recent messages (up to 10 minutes back, not yet read)
  * go to Claude, which picks out the to-dos and whose they are. So "유호숙제" followed by the details,
  * or a pasted notice followed by "유이숙제", both work. A notice pasted again is skipped, and items
