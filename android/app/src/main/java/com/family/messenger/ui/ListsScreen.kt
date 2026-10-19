@@ -46,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -61,6 +62,7 @@ import com.family.messenger.FamilyApp
 import com.family.messenger.data.ListItem
 import com.family.messenger.data.SourceMessage
 import java.time.Instant
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
@@ -90,6 +92,8 @@ fun ListsScreen(app: FamilyApp, keys: List<String> = listOf("shopping", "todo"),
     var due by rememberSaveable { mutableStateOf<String?>(null) }
     var pickDue by remember { mutableStateOf(false) }
     var source by remember { mutableStateOf<ListItem?>(null) }
+    var refreshing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val homework = keys == listOf(HOMEWORK)
     if (homework) LaunchedEffect(Unit) { viewModel.loadPeople() }
     val list = if (homework) lists.first() else lists.getOrElse(tab) { lists.first() }
@@ -167,8 +171,16 @@ fun ListsScreen(app: FamilyApp, keys: List<String> = listOf("shopping", "todo"),
             }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
             PullToRefreshBox(
-                isRefreshing = false,
-                onRefresh = { viewModel.refresh() },
+                isRefreshing = refreshing,
+                onRefresh = {
+                    // The arrow stays on screen until isRefreshing goes true and back to false.
+                    scope.launch {
+                        refreshing = true
+                        viewModel.refresh().join()
+                        if (homework) viewModel.loadPeople().join()
+                        refreshing = false
+                    }
+                },
                 modifier = Modifier.weight(1f),
             ) {
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
