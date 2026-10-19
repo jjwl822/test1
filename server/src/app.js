@@ -95,7 +95,8 @@ export function createServer({
   turn,
   fetchImpl,
   ringSeconds,
-  // { authors: ['mom'], assignee: 'kid', extract(text, today) } — homework notices from chat → 📚 list
+  // { authors: ['mom'], children: { 유호: 'uho', 유이: 'uiui' }, assignee: 'uiui', extract(text, today, existing) }
+  // — homework notices from chat → 📚 list ("유호숙제" picks the child, assignee is the default)
   homework,
 }) {
   if (!familyCode) throw new Error('familyCode is required');
@@ -338,13 +339,14 @@ export function createServer({
     notify,
     now,
     reminderHour,
-    homeworkFor: homework?.assignee,
+    homework,
   });
   if (homework?.extract && homework.authors?.length) {
     const everyone = () => db.prepare('SELECT id FROM users').all().map((r) => r.id);
     homeworkBot = createHomework({
       db,
       authors: homework.authors,
+      children: homework.children,
       assignee: homework.assignee,
       extract: homework.extract,
       now,

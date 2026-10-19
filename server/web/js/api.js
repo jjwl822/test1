@@ -84,7 +84,8 @@ export const api = {
   deleteEvent: (id) => del(`/api/events/${id}`),
 
   listItems: () => get('/api/lists/items'),
-  addItem: (list, text, due) => post('/api/lists/items', { list, text, due }),
+  addItem: (list, text, due, assigneeId) => post('/api/lists/items', { list, text, due, assigneeId }),
+  homeworkPeople: () => get('/api/homework/people'),
   setItemDue: (id, due) => patch(`/api/lists/items/${id}`, { due }),
   itemSource: (id) => get(`/api/lists/items/${id}/source`),
   setItemDone: (id, done) => patch(`/api/lists/items/${id}`, { done }),

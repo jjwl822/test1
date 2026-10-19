@@ -34,7 +34,7 @@ before(async () => {
     dataDir,
     now: () => clock,
     reminderHour: 9,
-    homework: { authors: ['mom'], assignee: 'kid', extract: fakeExtract },
+    homework: { authors: ['mom'], children: { 유호: 'boy', 유이: 'kid' }, assignee: 'kid', extract: fakeExtract },
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -59,7 +59,7 @@ async function call(method, url, { token, json } = {}) {
 const users = {};
 async function setup() {
   if (users.mom) return users;
-  for (const [username, displayName] of [['mom', '엄마'], ['dad', '아빠'], ['kid', '유이']]) {
+  for (const [username, displayName] of [['mom', '엄마'], ['dad', '아빠'], ['kid', '유이'], ['boy', '유호']]) {
     users[username] = (
       await call('POST', '/api/register', { json: { familyCode: 'secret', username, displayName, password: 'pass1234' } })
     ).data;
@@ -99,7 +99,7 @@ test('a notice followed by "유이숙제" becomes homework items, once', async (
   assert.match(source.messages[0].text, /라이팅/);
 
   const chat = (await call('GET', '/api/conversations/family/messages', { token: kid.token })).data;
-  assert.match(chat.at(-1).text, /📚 숙제 2개를 목록에 넣었어요/);
+  assert.match(chat.at(-1).text, /📚 유이 숙제 2개를 목록에 넣었어요/);
 
   // Saying it again finds nothing new to read.
   await say(mom, '유이숙제');
@@ -210,4 +210,36 @@ test('an old database gets the homework list without losing items', () => {
   ]);
   again.close();
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('homework is split between the children', async () => {
+  const { mom, kid, boy } = await setup();
+  const people = (await call('GET', '/api/homework/people', { token: kid.token })).data;
+  assert.deepEqual(people.map((p) => p.name), ['유이', '유호'], 'the default child comes first');
+
+  // "유호숙제" files the notice for 유호.
+  await say(mom, '수학 학원\n- 연산 2장 풀기');
+  await say(mom, '유호숙제');
+  await server.homeworkIdle();
+  const math = (await homework(boy)).find((i) => i.text === '연산 2장 풀기');
+  assert.equal(math.assigneeName, '유호');
+  const chat = (await call('GET', '/api/conversations/family/messages', { token: kid.token })).data;
+  assert.match(chat.at(-1).text, /📚 유호 숙제 1개/);
+
+  // A 📢 notice goes to 유이 right away; "유호숙제" just after moves it to 유호.
+  await say(mom, '📢 영어\n- 파닉스 3과 읽기');
+  await say(mom, '유호숙제');
+  await server.homeworkIdle();
+  const phonics = (await homework(boy)).find((i) => i.text === '파닉스 3과 읽기');
+  assert.equal(phonics.assigneeName, '유호');
+  const after = (await call('GET', '/api/conversations/family/messages', { token: kid.token })).data;
+  assert.match(after.at(-1).text, /유호 숙제로 옮겼어요/);
+
+  // Added by hand for a chosen child, and moved between them.
+  const item = (await call('POST', '/api/lists/items', { token: mom.token, json: { list: 'homework', text: '일기 쓰기', assigneeId: boy.user.id } })).data;
+  assert.equal(item.assigneeName, '유호');
+  const moved = (await call('PATCH', `/api/lists/items/${item.id}`, { token: mom.token, json: { assigneeId: kid.user.id } })).data;
+  assert.equal(moved.assigneeName, '유이');
+  const bad = await call('PATCH', `/api/lists/items/${item.id}`, { token: mom.token, json: { assigneeId: mom.user.id } });
+  assert.equal(bad.status, 400);
 });

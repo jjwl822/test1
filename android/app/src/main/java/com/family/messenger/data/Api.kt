@@ -170,12 +170,15 @@ class Api(private val session: Session) {
 
     suspend fun listItems(): List<ListItem> = call(Request.Builder().url(url("/api/lists/items")).build())
 
-    suspend fun addListItem(list: String, text: String, due: String? = null): ListItem =
+    suspend fun addListItem(list: String, text: String, due: String? = null, assigneeId: Long? = null): ListItem =
         call(post(url("/api/lists/items"), buildJsonObject {
             put("list", list)
             put("text", text)
             if (due != null) put("due", due)
+            if (assigneeId != null) put("assigneeId", assigneeId)
         }))
+
+    suspend fun homeworkPeople(): List<HomeworkPerson> = call(Request.Builder().url(url("/api/homework/people")).build())
 
     suspend fun listItemSource(id: Long): ListItemSource =
         call(Request.Builder().url(url("/api/lists/items/$id/source")).build())

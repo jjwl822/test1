@@ -107,10 +107,15 @@ data class ListItem(
     val doneAt: Long? = null,
     /** Homework due date, YYYY-MM-DD. */
     val due: String? = null,
+    val assigneeId: Long? = null,
     val assigneeName: String? = null,
     /** Taken from a notice in the family chat ([Api.listItemSource]). */
     val fromChat: Boolean = false,
 )
+
+/** A child the 숙제 tab has a page for. */
+@Serializable
+data class HomeworkPerson(val id: Long, val name: String)
 
 @Serializable
 data class SourceMessage(val id: Long, val text: String? = null, val senderName: String, val createdAt: Long)

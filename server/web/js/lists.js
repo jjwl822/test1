@@ -51,26 +51,38 @@ export const HomeworkScreen = () => ListsScreen({ keys: ['homework'], title: '�
 
 export function ListsScreen({ keys = ['shopping', 'todo'], title = '함께 쓰는 목록' } = {}) {
   const lists = LISTS.filter((l) => keys.includes(l.key));
+  const homework = keys.length === 1 && keys[0] === 'homework';
   const [items, setItems] = useState(null);
+  const [people, setPeople] = useState([]);
   const [tab, setTab] = useState(0);
   const [draft, setDraft] = useState('');
   const [due, setDue] = useState('');
   const [source, setSource] = useState(null);
   const [error, setError] = useState(null);
-  const list = lists[tab] ?? lists[0];
-  const homework = list.key === 'homework';
+  const list = homework ? lists[0] : (lists[tab] ?? lists[0]);
 
   const load = () => api.listItems().then((i) => { setItems(i); setError(null); }).catch((e) => setError(e.message));
   useEffect(() => {
     load();
+    if (homework) api.homeworkPeople().then(setPeople).catch((e) => setError(e.message));
     return onLive(['lists', 'connected'], load);
   }, []);
   const act = (work) => work().then(load).catch((e) => setError(e.message));
 
+  // Lists get a tab each; homework gets a tab per child (unassigned homework shows under the first).
+  const tabs = homework
+    ? people.map((p, n) => ({
+        title: p.name,
+        assigneeId: p.id,
+        has: (i) => i.list === 'homework' && (i.assigneeId === p.id || (n === 0 && !people.some((q) => q.id === i.assigneeId))),
+      }))
+    : lists.map((l) => ({ title: l.title, has: (i) => i.list === l.key }));
+  const current = tabs[tab] ?? tabs[0];
+
   // Homework: soonest due first, then the ones without a date.
   const byDue = (a, b) => (a.due ?? '9999').localeCompare(b.due ?? '9999');
   const shown = (items ?? [])
-    .filter((i) => i.list === list.key)
+    .filter((i) => (current ? current.has(i) : i.list === list.key))
     .sort((a, b) => Number(a.done) - Number(b.done) || (homework && !a.done ? byDue(a, b) : 0) || b.id - a.id);
   const doneCount = shown.filter((i) => i.done).length;
 
@@ -79,7 +91,7 @@ export function ListsScreen({ keys = ['shopping', 'todo'], title = '함께 쓰�
     if (!text) return;
     setDraft('');
     setDue('');
-    act(() => api.addItem(list.key, text, homework && due ? due : undefined));
+    act(() => api.addItem(list.key, text, homework && due ? due : undefined, homework ? current?.assigneeId : undefined));
   }
 
   function toggle(item) {
@@ -90,16 +102,15 @@ export function ListsScreen({ keys = ['shopping', 'todo'], title = '함께 쓰�
 
   function subtitle(i) {
     if (i.done && i.doneByName) return `${i.doneByName} 완료`;
-    const who = homework && i.assigneeName ? `${i.assigneeName} · ` : '';
-    return `${who}${i.authorName} ${i.fromChat ? '단체방에서' : '추가'} · ${ago(i.createdAt)}`;
+    return `${i.authorName} ${i.fromChat ? '단체방에서' : '추가'} · ${ago(i.createdAt)}`;
   }
 
   return html`<${TopBar} title=${title} />
-    ${lists.length > 1 &&
+    ${tabs.length > 1 &&
     html`<div class="tabs">
-      ${lists.map((l, i) => {
-        const open = (items ?? []).filter((x) => x.list === l.key && !x.done).length;
-        return html`<button class=${tab === i ? 'on' : ''} onClick=${() => setTab(i)}>${l.title}${open > 0 ? ` ${open}` : ''}</button>`;
+      ${tabs.map((t, i) => {
+        const open = (items ?? []).filter((x) => t.has(x) && !x.done).length;
+        return html`<button class=${tab === i ? 'on' : ''} onClick=${() => setTab(i)}>${t.title}${open > 0 ? ` ${open}` : ''}</button>`;
       })}
     </div>`}
     <div class="row" style="padding:12px">
@@ -115,7 +126,7 @@ export function ListsScreen({ keys = ['shopping', 'todo'], title = '함께 쓰�
       html`<input class="date-input" type="date" value=${due} min=${isoDate(new Date())} onInput=${(e) => setDue(e.target.value)} aria-label="마감일" />`}
       <button class="link" disabled=${!draft.trim()} onClick=${add}>추가</button>
     </div>
-    ${homework && html`<div class="tiny muted" style="padding:0 16px 8px">단체방에 📢 공지를 올리거나, 공지 뒤에 "숙제"(예: 유이숙제)라고 보내면 자동으로 들어와요.</div>`}
+    ${homework && html`<div class="tiny muted" style="padding:0 16px 8px">단체방에 📢 공지를 올리거나, 공지 뒤에 "유이숙제"·"유호숙제"라고 보내면 자동으로 들어와요.</div>`}
     ${error && html`<div class="error">${error}</div>`}
     <div class="scroll">
       ${items === null && html`<${Spinner} />`}

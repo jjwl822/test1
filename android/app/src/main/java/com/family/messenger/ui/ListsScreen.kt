@@ -90,10 +90,22 @@ fun ListsScreen(app: FamilyApp, keys: List<String> = listOf("shopping", "todo"),
     var due by rememberSaveable { mutableStateOf<String?>(null) }
     var pickDue by remember { mutableStateOf(false) }
     var source by remember { mutableStateOf<ListItem?>(null) }
-    val list = lists.getOrElse(tab) { lists.first() }
-    val homework = list.key == HOMEWORK
+    val homework = keys == listOf(HOMEWORK)
+    if (homework) LaunchedEffect(Unit) { viewModel.loadPeople() }
+    val list = if (homework) lists.first() else lists.getOrElse(tab) { lists.first() }
+    // A tab per list, or for homework a tab per child (unassigned homework shows under the first).
+    val people = state.people
+    val tabs: List<Pair<String, (ListItem) -> Boolean>> = if (homework) {
+        people.mapIndexed { n, p ->
+            p.name to { i: ListItem -> i.list == HOMEWORK && (i.assigneeId == p.id || (n == 0 && people.none { it.id == i.assigneeId })) }
+        }
+    } else {
+        lists.map { l -> l.title to { i: ListItem -> i.list == l.key } }
+    }
+    val current = tabs.getOrNull(tab) ?: tabs.firstOrNull()
+    val assigneeId = if (homework) people.getOrNull(tab)?.id ?: people.firstOrNull()?.id else null
     // Homework: soonest due first among the unfinished ones.
-    val items = state.items.filter { it.list == list.key }.sortedWith(
+    val items = state.items.filter { current?.second?.invoke(it) ?: (it.list == list.key) }.sortedWith(
         compareBy<ListItem> { it.done }
             .thenBy { if (homework && !it.done) it.due ?: "9999" else "" }
             .thenByDescending { it.id },
@@ -102,14 +114,14 @@ fun ListsScreen(app: FamilyApp, keys: List<String> = listOf("shopping", "todo"),
 
     fun submit() {
         if (draft.isBlank()) return
-        viewModel.add(list.key, draft.trim(), if (homework) due else null)
+        viewModel.add(list.key, draft.trim(), if (homework) due else null, assigneeId)
         draft = ""
         due = null
     }
 
     Scaffold(topBar = { TopAppBar(title = { Text(title, style = MaterialTheme.typography.titleLarge) }) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            if (lists.size > 1) SecondaryTabRow(
+            if (tabs.size > 1) SecondaryTabRow(
                 selectedTabIndex = tab,
                 indicator = {
                     TabRowDefaults.SecondaryIndicator(
@@ -118,12 +130,12 @@ fun ListsScreen(app: FamilyApp, keys: List<String> = listOf("shopping", "todo"),
                     )
                 },
             ) {
-                lists.forEachIndexed { i, l ->
-                    val open = state.items.count { it.list == l.key && !it.done }
+                tabs.forEachIndexed { i, (label, has) ->
+                    val open = state.items.count { has(it) && !it.done }
                     Tab(
                         selected = tab == i,
                         onClick = { tab = i },
-                        text = { Text(if (open > 0) "${l.title} $open" else l.title, fontWeight = FontWeight.SemiBold) },
+                        text = { Text(if (open > 0) "$label $open" else label, fontWeight = FontWeight.SemiBold) },
                     )
                 }
             }
@@ -147,7 +159,7 @@ fun ListsScreen(app: FamilyApp, keys: List<String> = listOf("shopping", "todo"),
             }
             if (homework) {
                 Text(
-                    "단체방에 📢 공지를 올리거나, 공지 뒤에 \"숙제\"(예: 유이숙제)라고 보내면 자동으로 들어와요.",
+                    "단체방에 📢 공지를 올리거나, 공지 뒤에 \"유이숙제\"·\"유호숙제\"라고 보내면 자동으로 들어와요.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
@@ -315,10 +327,9 @@ private fun ItemRow(item: ListItem, onToggle: () -> Unit, onDelete: () -> Unit, 
                     modifier = Modifier.weight(1f, fill = false),
                 )
             }
-            val who = if (item.list == HOMEWORK && item.assigneeName != null) "${item.assigneeName} · " else ""
             Text(
                 if (item.done && item.doneByName != null) "${item.doneByName} 완료"
-                else "$who${item.authorName} ${if (item.fromChat) "단체방에서" else "추가"} · ${formatAgo(item.createdAt)}",
+                else "${item.authorName} ${if (item.fromChat) "단체방에서" else "추가"} · ${formatAgo(item.createdAt)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

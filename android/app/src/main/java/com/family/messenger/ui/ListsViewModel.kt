@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.family.messenger.FamilyApp
+import com.family.messenger.data.HomeworkPerson
 import com.family.messenger.data.ListItem
 import com.family.messenger.data.MessageBus
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +19,8 @@ import kotlinx.coroutines.launch
 class ListsViewModel(application: Application) : AndroidViewModel(application) {
     data class State(
         val items: List<ListItem> = emptyList(),
+        /** Children with a page in the 숙제 tab. */
+        val people: List<HomeworkPerson> = emptyList(),
         val loading: Boolean = true,
         val error: String? = null,
     )
@@ -35,8 +38,10 @@ class ListsViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refresh() = action { _state.value = _state.value.copy(items = app.api.listItems(), loading = false) }
 
-    fun add(list: String, text: String, due: String? = null) = action {
-        app.api.addListItem(list, text, due)
+    fun loadPeople() = action { _state.value = _state.value.copy(people = app.api.homeworkPeople()) }
+
+    fun add(list: String, text: String, due: String? = null, assigneeId: Long? = null) = action {
+        app.api.addListItem(list, text, due, assigneeId)
         refresh()
     }
 

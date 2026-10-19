@@ -1,3 +1,4 @@
+import { homeworkPeople } from './homework.js';
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const LISTS = ['shopping', 'todo', 'homework'];
@@ -17,7 +18,7 @@ function validDate(value) {
  * Family calendar (with day-before and same-day reminders), "1년 전 오늘" memory reminders,
  * and the shared shopping / to-do / homework lists.
  */
-export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, connectedUserIds, notify, now, reminderHour, homeworkFor }) {
+export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, connectedUserIds, notify, now, reminderHour, homework }) {
   // ---- Calendar -------------------------------------------------------------------------------
 
   const EVENT_SELECT = `
@@ -176,9 +177,13 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
   });
   const itemById = db.prepare(`${ITEM_SELECT} WHERE i.id = ?`);
   const listsChanged = () => broadcastAll({ type: 'lists' });
-  /** Who homework is for (data/config.json homework.assignee), if that person exists. */
-  const homeworkAssignee = () =>
-    (homeworkFor && db.prepare('SELECT id FROM users WHERE username = ?').get(homeworkFor)?.id) ?? null;
+  /** The children homework is for (data/config.json homework.children / assignee). */
+  const people = () => homeworkPeople(db, homework);
+  /** [requested] if it's one of the children, else the first child (or null). */
+  const homeworkAssignee = (requested) => {
+    const list = people();
+    return (list.find((p) => p.id === requested) ?? list[0])?.id ?? null;
+  };
   const itemText = (value) => (typeof value === 'string' ? value.trim() : '');
   /** undefined: not given, null: cleared, 'YYYY-MM-DD', or false when invalid. */
   const dueDate = (value) => (value === undefined ? undefined : value === null || value === '' ? null : validDate(value) ? value : false);
@@ -195,12 +200,12 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
     if (due === false) return res.status(400).json({ error: '날짜가 올바르지 않습니다.' });
     const { lastInsertRowid } = db
       .prepare('INSERT INTO list_items (list, text, author_id, created_at, due, assignee_id) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(req.body.list, text, req.user.id, Date.now(), due ?? null, req.body.list === 'homework' ? homeworkAssignee() : null);
+      .run(req.body.list, text, req.user.id, Date.now(), due ?? null, req.body.list === 'homework' ? homeworkAssignee(req.body?.assigneeId) : null);
     listsChanged();
     res.status(201).json(toItem(itemById.get(lastInsertRowid)));
   });
 
-  // Body: { done?: boolean, text?: string, due?: 'YYYY-MM-DD' | null }
+  // Body: { done?: boolean, text?: string, due?: 'YYYY-MM-DD' | null, assigneeId?: number }
   app.patch('/api/lists/items/:id', auth, (req, res) => {
     const id = Number(req.params.id) || 0;
     if (!itemById.get(id)) return res.status(404).json({ error: '항목을 찾을 수 없습니다.' });
@@ -220,8 +225,17 @@ export function registerFamilyRoutes(app, { db, auth, broadcastAll, sendTo, conn
     const due = dueDate(req.body?.due);
     if (due === false) return res.status(400).json({ error: '날짜가 올바르지 않습니다.' });
     if (due !== undefined) db.prepare('UPDATE list_items SET due = ? WHERE id = ?').run(due, id);
+    if (req.body?.assigneeId !== undefined) {
+      if (!people().some((p) => p.id === req.body.assigneeId)) return res.status(400).json({ error: '숙제를 받을 사람이 아닙니다.' });
+      db.prepare('UPDATE list_items SET assignee_id = ? WHERE id = ?').run(req.body.assigneeId, id);
+    }
     listsChanged();
     res.json(toItem(itemById.get(id)));
+  });
+
+  // Whose homework the 📚 tab shows, in order: [{ id, name }].
+  app.get('/api/homework/people', auth, (_req, res) => {
+    res.json(people().map((p) => ({ id: p.id, name: p.name })));
   });
 
   // The chat messages a homework item was taken from.

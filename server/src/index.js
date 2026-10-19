@@ -56,9 +56,15 @@ const turn = {
   token: process.env.TURN_KEY_API_TOKEN || config.turnKeyToken,
 };
 // Homework notices in the family chat → 📚 list (optional), using Claude Code signed in on this PC:
-// data/config.json { "homework": { "authors": ["mom"], "assignee": "kid", "model": "sonnet", "effort": "medium" } }
+// data/config.json { "homework": { "authors": ["mom"], "children": { "유호": "uho", "유이": "uiui" }, "assignee": "uiui",
+//                                   "model": "sonnet", "effort": "medium" } }
 const homework = config.homework?.authors?.length
-  ? { authors: config.homework.authors, assignee: config.homework.assignee, extract: claudeExtractor(config.homework) }
+  ? {
+      authors: config.homework.authors,
+      children: config.homework.children,
+      assignee: config.homework.assignee,
+      extract: claudeExtractor(config.homework),
+    }
   : undefined;
 createServer({ familyCode: code, dataDir, reminderHour, turn, homework }).listen(port, () => {
   const addresses = lanAddresses();
@@ -74,7 +80,7 @@ createServer({ familyCode: code, dataDir, reminderHour, turn, homework }).listen
   console.log(` 가족 코드: ${code}`);
   console.log(` 데이터 저장 위치: ${dataDir}`);
   console.log(` 통화 중계(Cloudflare TURN): ${turn.keyId && turn.token ? '켜짐' : '꺼짐 (같은 와이파이 등 직접 연결만)'}`);
-  console.log(` 숙제 자동 등록: ${homework ? `켜짐 (${homework.authors.join(', ')} → ${homework.assignee ?? '-'})` : '꺼짐'}`);
+  console.log(` 숙제 자동 등록: ${homework ? `켜짐 (${homework.authors.join(', ')} → ${Object.keys(homework.children ?? {}).join('·') || homework.assignee || '-'})` : '꺼짐'}`);
   console.log(' 이 창을 닫으면 서버가 꺼집니다.');
   console.log('========================================');
 });
