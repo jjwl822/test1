@@ -52,7 +52,7 @@ export function createRace({ db, now = Date.now }) {
       hostId: hostId(),
       track: settings.track,
       bots: settings.bots,
-      players: [...players.values()].map((p) => ({ id: p.id, name: p.name, car: p.car, ready: p.ready })),
+      players: [...players.values()].map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, car: p.car, ready: p.ready })),
       race: race && {
         track: race.track,
         startAt: race.startAt,
@@ -62,7 +62,7 @@ export function createRace({ db, now = Date.now }) {
     };
   }
   const sendRoom = () => broadcast(roomState());
-  const racerInfo = (r) => ({ id: r.id, name: r.name, car: r.car, bot: r.bot, slot: r.slot });
+  const racerInfo = (r) => ({ id: r.id, name: r.name, avatar: r.avatar ?? null, car: r.car, bot: r.bot, slot: r.slot });
 
   function records() {
     const rows = db
@@ -87,7 +87,7 @@ export function createRace({ db, now = Date.now }) {
     const used = new Set(humans.map((p) => p.car));
     const freeCars = CARS.map((c) => c.id).filter((id) => !used.has(id));
     const racers = [
-      ...humans.map((p) => ({ id: p.id, userId: p.userId, name: p.name, car: p.car, bot: false })),
+      ...humans.map((p) => ({ id: p.id, userId: p.userId, name: p.name, avatar: p.avatar, car: p.car, bot: false })),
       ...Array.from({ length: botCount }, (_, k) => ({
         id: `b${k}`,
         name: BOT_NAMES[k % BOT_NAMES.length],
@@ -240,6 +240,7 @@ export function createRace({ db, now = Date.now }) {
       id,
       userId: user.id,
       name: user.displayName,
+      avatar: user.avatarUrl ?? null, // profile photo, shown over the car
       car: old?.car ?? CARS.find((c) => !used.has(c.id))?.id ?? CARS[0].id,
       ready: false,
       ws,

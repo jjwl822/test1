@@ -2132,29 +2132,81 @@ export function makeCar(def) {
   return car;
 }
 
-/** Floating name over a car. */
-export function makeNameTag(text, color) {
+/**
+ * Floating badge over a car: the family member's profile photo in a ring of their car color, with
+ * their name underneath. Computer cars get a robot face. Until the photo loads, the first letter.
+ */
+export function makeNameTag(text, color, { avatar = null, bot = false } = {}) {
+  const W = 256;
+  const H = 300;
   const c = document.createElement('canvas');
-  c.width = 256;
-  c.height = 64;
+  c.width = W;
+  c.height = H;
   const ctx = c.getContext('2d');
-  ctx.font = 'bold 34px -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
-  const w = Math.min(248, ctx.measureText(text).width + 32);
-  ctx.fillStyle = 'rgba(0,0,0,.55)';
-  const x = (256 - w) / 2;
-  ctx.beginPath();
-  ctx.roundRect(x, 8, w, 48, 24);
-  ctx.fill();
-  ctx.fillStyle = color;
-  ctx.fillRect(x + 14, 26, 12, 12);
-  ctx.fillStyle = '#fff';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, 128 + 8, 33);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  const font = '-apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+  const cx = W / 2;
+  const cy = 104;
+  const R = 92;
+
+  function draw(img) {
+    ctx.clearRect(0, 0, W, H);
+    // soft drop shadow, colored ring, white inner ring
+    ctx.fillStyle = 'rgba(0,0,0,.25)';
+    ctx.beginPath();
+    ctx.arc(cx, cy + 6, R + 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R + 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(cx, cy, R + 1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, R - 4, 0, Math.PI * 2);
+    ctx.clip();
+    if (img) {
+      // cover-fit the photo into the circle
+      const k = Math.max((2 * R) / img.width, (2 * R) / img.height);
+      const w = img.width * k;
+      const h = img.height * k;
+      ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
+    } else {
+      ctx.fillStyle = bot ? '#dfe6f2' : color;
+      ctx.fillRect(cx - R, cy - R, 2 * R, 2 * R);
+      ctx.fillStyle = bot ? '#3a3542' : '#fff';
+      ctx.font = `bold ${bot ? 110 : 96}px ${font}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(bot ? '🤖' : [...text][0] ?? '?', cx, cy + 6);
+    }
+    ctx.restore();
+    // name pill
+    ctx.font = `bold 34px ${font}`;
+    const tw = Math.min(W - 8, ctx.measureText(text).width + 32);
+    ctx.fillStyle = 'rgba(30,24,40,.72)';
+    ctx.beginPath();
+    ctx.roundRect((W - tw) / 2, 222, tw, 52, 26);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, cx, 249);
+    tex.needsUpdate = true;
+  }
+  draw(null);
+  if (avatar) {
+    const img = new Image();
+    img.onload = () => draw(img);
+    img.src = avatar;
+  }
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-  s.scale.set(4, 1, 1);
+  s.scale.set(3, (3 * H) / W, 1);
+  s.center.set(0.5, 0);
   s.renderOrder = 10;
   return s;
 }

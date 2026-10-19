@@ -20,6 +20,13 @@ export function fmt(ms) {
   const m = Math.floor(t / 60);
   return `${m}:${(t - m * 60).toFixed(2).padStart(5, '0')}`;
 }
+/** Round profile photo (or first letter) with a ring in the car color. */
+function avatarHtml(url, name, color, size) {
+  const inner = url
+    ? `<img src="${esc(url)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+    : `<span style="font-size:${Math.round(size * 0.5)}px;font-weight:800">${esc([...String(name)][0] ?? '?')}</span>`;
+  return `<span class="ava" style="width:${size}px;height:${size}px;box-shadow:0 0 0 2px ${color};background:${color}">${inner}</span>`;
+}
 const durLabel = (sec) => (sec < 120 ? '1분 30초' : sec < 200 ? '2분 30초' : '4분');
 
 // ---- Renderer -------------------------------------------------------------------------------
@@ -396,7 +403,7 @@ function renderLobby() {
       const c = carById(p.car);
       const isHost = p.id === room.hostId;
       const state = isHost ? '👑 방장' : p.ready ? '✅ 준비' : '⏳';
-      return `<li class="${p.ready || isHost ? 'ready' : ''}"><span class="dot" style="background:${c.color}"></span>${esc(p.name)}${p.id === S.me ? ' (나)' : ''} · ${state}</li>`;
+      return `<li class="${p.ready || isHost ? 'ready' : ''}">${avatarHtml(p.avatar, p.name, c.color, 26)}${esc(p.name)}${p.id === S.me ? ' (나)' : ''} · ${state}</li>`;
     })
     .join('');
 
@@ -608,7 +615,7 @@ function beginRace(m, spectate) {
       if (info.bot) r.ai = { skill: rand(0.9, 0.985), lane: rand(-0.6, 0.6), t: rand(0, 50) };
     }
     if (info.id !== S.me) {
-      r.tag = makeNameTag(info.name, carDef.color);
+      r.tag = makeNameTag(info.name, carDef.color, { avatar: info.avatar, bot: info.bot });
       world.scene.add(r.tag);
     }
     if (info.id === S.me && !spectate) R.mine = r;
@@ -884,7 +891,13 @@ function updateRace(dt) {
       charge: flags & 32 ? 2 : flags & 8 ? 1 : 0,
       t: R.t,
     });
-    if (r.tag) r.tag.position.set(v.x, v.y + 3.1, v.z);
+    // Badge floats above the driver; it shrinks a little up close so it doesn't cover the road.
+    if (r.tag) {
+      r.tag.position.set(v.x, v.y + 2.6, v.z);
+      const d = camera.position.distanceTo(r.tag.position);
+      const k = clamp(d / 18, 0.55, 1.6);
+      r.tag.scale.set(3 * k, 3.5 * k, 1);
+    }
   }
 
   placeCamera(false, dt);
@@ -923,6 +936,11 @@ function updateHud(now, raceMs) {
   const focus = R.mine ?? list[0];
   const pos = list.indexOf(focus) + 1;
   $('rank').innerHTML = `${focus?.finished && focus.rank ? focus.rank : pos}<small>/${list.length}</small>`;
+  if (R.mine && !R.avatarShown) {
+    R.avatarShown = true;
+    const me = S.room?.players.find((p) => p.id === S.me);
+    $('meFace').innerHTML = avatarHtml(me?.avatar, R.mine.name, R.mine.carDef.color, 40);
+  }
   const car = R.mine?.car;
   const prog = car ? car.prog : focus?.view.prog ?? 0;
   const lap = clamp(Math.floor(prog / R.track.length) + 1, 1, R.laps);
@@ -1027,7 +1045,7 @@ function showResults(m) {
     .map((r) => {
       const c = carById(r.car);
       return `<li class="${r.id === S.me ? 'me' : ''}"><span class="rk">${medals[r.rank - 1] ?? r.rank}</span>
-        <span class="nm"><span class="dot" style="background:${c.color}"></span> ${esc(r.name)}${r.bot ? ' 🤖' : ''}</span>
+        <span class="nm">${r.bot ? avatarHtml(null, '🤖', c.color, 30) : avatarHtml(r.avatar, r.name, c.color, 30)} ${esc(r.name)}</span>
         <span class="tm">${r.time != null ? fmt(r.time) : '완주 못 함'}</span></li>`;
     })
     .join('');
