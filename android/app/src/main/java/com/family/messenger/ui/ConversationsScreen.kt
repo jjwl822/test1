@@ -95,6 +95,8 @@ fun ConversationsScreen(
                     Box {
                         IconButton(onClick = { showSettings = true }) { Icon(Icons.Filled.Settings, contentDescription = "설정") }
                         DropdownMenu(expanded = showSettings, onDismissRequest = { showSettings = false }) {
+                            val version = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
+                            DropdownMenuItem(text = { Text("현재 버전 $version", color = MaterialTheme.colorScheme.onSurfaceVariant) }, onClick = {}, enabled = false)
                             DropdownMenuItem(
                                 text = { Text("최신 버전 다운로드") },
                                 onClick = {

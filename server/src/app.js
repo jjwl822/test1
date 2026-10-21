@@ -379,7 +379,7 @@ export function createServer({
         // scripts and styles neither: Cloudflare tells browsers to keep them for 4 hours unless they're
         // marked private (plain no-cache isn't enough), so an update wouldn't show. Browsers still
         // reuse an unchanged file (ETag), they just check first.
-        if (/(index\.html|sw\.js|\.webmanifest|\.js|\.css)$/.test(file) || file.includes(`${path.sep}games${path.sep}`)) {
+        if (/(index\.html|sw\.js|\.webmanifest|\.js|\.css|\.apk)$/.test(file) || file.includes(`${path.sep}games${path.sep}`)) {
           res.set('Cache-Control', 'private, no-cache');
         }
       },
