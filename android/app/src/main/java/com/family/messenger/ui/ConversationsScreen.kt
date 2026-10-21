@@ -34,6 +34,7 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -65,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.family.messenger.FamilyApp
+import com.family.messenger.data.AppUpdater
 import com.family.messenger.data.AppVersion
 import com.family.messenger.data.Conversation
 import com.family.messenger.data.ImageCompressor
@@ -94,6 +96,10 @@ fun ConversationsScreen(
     val updateAvailable = (latest?.versionCode ?: 0) > installed.versionCode
     // Check once when the chat list opens so the settings button can show a dot for a new version.
     LaunchedEffect(Unit) { runCatching { app.api.latestAppVersion() }.onSuccess { latest = it } }
+    val updater = remember { AppUpdater(context.applicationContext, app.api) }
+    var askInstallPermission by remember { mutableStateOf(false) }
+    var updateProgress by remember { mutableStateOf<Float?>(null) }
+    var updateError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     Scaffold(
@@ -130,13 +136,61 @@ fun ConversationsScreen(
                                 enabled = false,
                             )
                             DropdownMenuItem(
-                                text = { Text(if (updateAvailable) "최신 버전 다운로드" else "다시 다운로드") },
+                                text = { Text(if (updateAvailable) "업데이트 설치" else "다시 설치") },
                                 onClick = {
                                     showSettings = false
-                                    // The browser downloads the APK the server hosts; the timestamp skips Cloudflare's cache.
-                                    val apk = app.api.url("/app/family.apk") + "?t=" + System.currentTimeMillis()
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apk)))
+                                    if (!updater.canInstall()) {
+                                        askInstallPermission = true
+                                    } else {
+                                        scope.launch {
+                                            updateProgress = 0f
+                                            try {
+                                                updater.downloadAndInstall { updateProgress = it }
+                                            } catch (e: Exception) {
+                                                updateError = e.message ?: "업데이트를 받지 못했어요."
+                                            }
+                                            updateProgress = null
+                                        }
+                                    }
                                 },
+                            )
+                        }
+                        if (askInstallPermission) {
+                            AlertDialog(
+                                onDismissRequest = { askInstallPermission = false },
+                                title = { Text("처음 한 번만 허용해 주세요") },
+                                text = { Text("설정 화면에서 '이 출처 허용'을 켜고 돌아와서 다시 눌러 주세요. 다음부터는 바로 업데이트돼요.") },
+                                confirmButton = {
+                                    TextButton(onClick = {
+                                        askInstallPermission = false
+                                        updater.openInstallPermissionSettings()
+                                    }) { Text("설정 열기") }
+                                },
+                                dismissButton = { TextButton(onClick = { askInstallPermission = false }) { Text("취소") } },
+                            )
+                        }
+                        updateProgress?.let { progress ->
+                            AlertDialog(
+                                onDismissRequest = {},
+                                title = { Text("업데이트 받는 중…") },
+                                text = { LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth()) },
+                                confirmButton = {},
+                            )
+                        }
+                        updateError?.let { message ->
+                            AlertDialog(
+                                onDismissRequest = { updateError = null },
+                                title = { Text("업데이트 실패") },
+                                text = { Text(message) },
+                                confirmButton = {
+                                    TextButton(onClick = {
+                                        updateError = null
+                                        // Fallback: let the browser download it; the timestamp skips Cloudflare's cache.
+                                        val apk = app.api.url("/app/family.apk") + "?t=" + System.currentTimeMillis()
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apk)))
+                                    }) { Text("브라우저로 받기") }
+                                },
+                                dismissButton = { TextButton(onClick = { updateError = null }) { Text("닫기") } },
                             )
                         }
                     }
