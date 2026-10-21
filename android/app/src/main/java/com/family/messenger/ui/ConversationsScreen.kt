@@ -29,6 +29,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -51,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -62,6 +65,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.family.messenger.FamilyApp
+import com.family.messenger.data.AppVersion
 import com.family.messenger.data.Conversation
 import com.family.messenger.data.ImageCompressor
 import com.family.messenger.data.User
@@ -82,6 +86,14 @@ fun ConversationsScreen(
     var showProfile by rememberSaveable { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val installed = remember {
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        AppVersion(PackageInfoCompat.getLongVersionCode(info), info.versionName.orEmpty())
+    }
+    var latest by remember { mutableStateOf<AppVersion?>(null) }
+    val updateAvailable = (latest?.versionCode ?: 0) > installed.versionCode
+    // Check once when the chat list opens so the settings button can show a dot for a new version.
+    LaunchedEffect(Unit) { runCatching { app.api.latestAppVersion() }.onSuccess { latest = it } }
     val scope = rememberCoroutineScope()
 
     Scaffold(
@@ -93,12 +105,32 @@ fun ConversationsScreen(
                         Avatar(me.displayName, size = 34.dp, imageUrl = app.avatarUrl(users[me.id] ?: me), color = bubbleColor((users[me.id] ?: me).color))
                     }
                     Box {
-                        IconButton(onClick = { showSettings = true }) { Icon(Icons.Filled.Settings, contentDescription = "설정") }
+                        IconButton(onClick = {
+                            showSettings = true
+                            scope.launch { runCatching { app.api.latestAppVersion() }.onSuccess { latest = it } }
+                        }) {
+                            BadgedBox(badge = { if (updateAvailable) Badge() }) { Icon(Icons.Filled.Settings, contentDescription = "설정") }
+                        }
                         DropdownMenu(expanded = showSettings, onDismissRequest = { showSettings = false }) {
-                            val version = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
-                            DropdownMenuItem(text = { Text("현재 버전 $version", color = MaterialTheme.colorScheme.onSurfaceVariant) }, onClick = {}, enabled = false)
                             DropdownMenuItem(
-                                text = { Text("최신 버전 다운로드") },
+                                text = {
+                                    Column {
+                                        Text("내 버전 ${installed.versionName}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            when {
+                                                latest == null -> "최신 버전 확인 중…"
+                                                updateAvailable -> "최신 버전 ${latest?.versionName} (업데이트 있음)"
+                                                else -> "최신 버전 ${latest?.versionName} (최신이에요)"
+                                            },
+                                            color = if (updateAvailable) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                },
+                                onClick = {},
+                                enabled = false,
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (updateAvailable) "최신 버전 다운로드" else "다시 다운로드") },
                                 onClick = {
                                     showSettings = false
                                     // The browser downloads the APK the server hosts; the timestamp skips Cloudflare's cache.

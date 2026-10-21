@@ -12,6 +12,10 @@ data class User(
     val color: String? = null,
 )
 
+/** The newest app build on the server (web/app/version.json, written next to family.apk). */
+@Serializable
+data class AppVersion(val versionCode: Long, val versionName: String)
+
 @Serializable
 data class AuthResponse(
     val token: String,

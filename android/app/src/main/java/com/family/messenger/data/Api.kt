@@ -173,6 +173,9 @@ class Api(private val session: Session) {
 
     suspend fun games(): List<GameInfo> = call(Request.Builder().url(url("/api/games")).build())
 
+    suspend fun latestAppVersion(): AppVersion =
+        call(Request.Builder().url(url("/app/version.json") + "?t=" + System.currentTimeMillis()).build())
+
     suspend fun listItems(): List<ListItem> = call(Request.Builder().url(url("/api/lists/items")).build())
 
     suspend fun addListItem(list: String, text: String, due: String? = null, assigneeId: Long? = null): ListItem =
