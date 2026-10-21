@@ -99,6 +99,7 @@ fun ConversationsScreen(
     val updater = remember { AppUpdater(context.applicationContext, app.api) }
     var askInstallPermission by remember { mutableStateOf(false) }
     var updateProgress by remember { mutableStateOf<Float?>(null) }
+    var updateReconnecting by remember { mutableStateOf(false) }
     var updateError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -145,7 +146,10 @@ fun ConversationsScreen(
                                         scope.launch {
                                             updateProgress = 0f
                                             try {
-                                                updater.downloadAndInstall { updateProgress = it }
+                                                updater.downloadAndInstall { progress, retrying ->
+                                                    updateProgress = progress
+                                                    updateReconnecting = retrying
+                                                }
                                             } catch (e: Exception) {
                                                 updateError = e.message ?: "업데이트를 받지 못했어요."
                                             }
@@ -172,8 +176,13 @@ fun ConversationsScreen(
                         updateProgress?.let { progress ->
                             AlertDialog(
                                 onDismissRequest = {},
-                                title = { Text("업데이트 받는 중…") },
-                                text = { LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth()) },
+                                title = { Text(if (updateReconnecting) "연결이 끊겨 다시 연결하는 중…" else "업데이트 받는 중…") },
+                                text = {
+                                    Column {
+                                        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                                        Text("${(progress * 100).toInt()}%", modifier = Modifier.padding(top = 8.dp))
+                                    }
+                                },
                                 confirmButton = {},
                             )
                         }
