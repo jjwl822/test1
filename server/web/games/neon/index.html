@@ -501,8 +501,20 @@ function burst(lane,j){
   for(let i=0;i<n;i++){const a=-Math.PI*(.1+.8*Math.random()),v=120+Math.random()*320;
     G.parts.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,life:.55,c:j==='PERFECT'?(Math.random()<.5?COL[lane]:'#fff'):COL[lane]});}
 }
+/* tap sound: short click + blip, pitch per lane */
+const TAP_HZ=[523,659,784,1047];
+function tapSfx(lane){
+  try{
+    const o=getCtx(),t=o.currentTime;
+    noise(o,t,.03,'highpass',3000,.25,o.destination,1);
+    const os=o.createOscillator(),gn=o.createGain();os.type='triangle';
+    os.frequency.setValueAtTime(TAP_HZ[lane]*1.5,t);os.frequency.exponentialRampToValueAtTime(TAP_HZ[lane],t+.04);
+    gn.gain.setValueAtTime(.35,t);gn.gain.exponentialRampToValueAtTime(.001,t+.09);
+    os.connect(gn);gn.connect(o.destination);os.start(t);os.stop(t+.1);
+  }catch(e){}
+}
 function press(lane,id,t){
-  G.lanePress[lane]++;G.flash[lane]=1;
+  G.lanePress[lane]++;G.flash[lane]=1;tapSfx(lane);
   for(let i=G.idx;i<G.notes.length;i++){
     const n=G.notes[i];if(n.t-t>W_GD)break;
     if(n.lane!==lane||n.st!==0||t-n.t>W_GD)continue;
