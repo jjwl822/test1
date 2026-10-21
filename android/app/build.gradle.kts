@@ -13,8 +13,8 @@ android {
         applicationId = "com.family.messenger"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
         // WebRTC ships native code; phones only need the ARM builds (keeps the APK much smaller).
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }

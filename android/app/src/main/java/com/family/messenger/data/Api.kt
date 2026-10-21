@@ -1,6 +1,7 @@
 package com.family.messenger.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -16,10 +17,14 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
+import okhttp3.Response
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.IOException
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
 class ApiException(message: String, val code: Int = 0) : Exception(message)
@@ -271,12 +276,7 @@ class Api(private val session: Session) {
     private fun String.toJsonBody(): RequestBody = toRequestBody("application/json".toMediaType())
 
     private suspend inline fun <reified T> call(request: Request): T = withContext(Dispatchers.IO) {
-        val response = try {
-            client.newCall(request).execute()
-        } catch (e: IOException) {
-            throw ApiException("서버에 연결할 수 없습니다. 주소와 네트워크를 확인하세요.")
-        }
-        response.use {
+        sendWithRetry(request).use {
             val text = it.body?.string().orEmpty()
             if (!it.isSuccessful) {
                 if (it.code == 401 && session.auth.value != null && !request.url.encodedPath.endsWith("/login")) {
@@ -290,7 +290,36 @@ class Api(private val session: Session) {
         }
     }
 
+    /**
+     * Sends a request, trying again a few times when the server is briefly unreachable (the tunnel
+     * drops now and then). Reads retry on any connection or gateway error. Writes retry only when
+     * the request can't have reached the server, so a message is never posted twice.
+     */
+    private suspend fun sendWithRetry(request: Request): Response {
+        val read = request.method == "GET"
+        var attempt = 0
+        while (true) {
+            val last = attempt >= RETRY_DELAYS_MS.size
+            try {
+                val response = client.newCall(request).execute()
+                val retry = if (read) response.code in GATEWAY_ERRORS else response.code == TUNNEL_DOWN
+                if (last || !retry) return response
+                response.close()
+            } catch (e: IOException) {
+                val notSent = e is ConnectException || e is UnknownHostException || e is NoRouteToHostException
+                if (last || !(read || notSent)) throw ApiException("서버에 연결할 수 없습니다. 주소와 네트워크를 확인하세요.")
+            }
+            delay(RETRY_DELAYS_MS[attempt++])
+        }
+    }
+
     companion object {
+        private val RETRY_DELAYS_MS = longArrayOf(1_000, 2_000, 4_000)
+        /** Gateway errors Cloudflare returns while the server or tunnel is unreachable. */
+        private val GATEWAY_ERRORS = setOf(502, 503, 504, 520, 521, 522, 523, 524, 530)
+        /** Tunnel down: the request never reached the server, so even a write can be resent. */
+        private const val TUNNEL_DOWN = 530
+
         val json = Json {
             ignoreUnknownKeys = true
             explicitNulls = false

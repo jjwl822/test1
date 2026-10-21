@@ -11,18 +11,39 @@ export class ApiError extends Error {
 /** Fires when the server says we're no longer logged in. */
 export const onLoggedOut = new EventTarget();
 
-async function request(method, path, body, contentType) {
-  let res;
-  try {
-    res = await fetch(path, {
-      method,
-      credentials: 'same-origin',
-      headers: body === undefined ? {} : { 'content-type': contentType || 'application/json' },
-      body: body === undefined ? undefined : contentType ? body : JSON.stringify(body),
-    });
-  } catch {
-    throw new ApiError('서버에 연결할 수 없습니다. 인터넷 연결을 확인하세요.', 0);
+const RETRY_DELAYS_MS = [1000, 2000, 4000];
+// Gateway errors Cloudflare returns while the server or tunnel is unreachable.
+const GATEWAY_ERRORS = new Set([502, 503, 504, 520, 521, 522, 523, 524, 530]);
+// Tunnel down: the request never reached the server, so even a write can be resent.
+const TUNNEL_DOWN = 530;
+
+/**
+ * fetch, trying again a few times when the server is briefly unreachable (the tunnel drops now and
+ * then). Reads retry on any connection or gateway error. Writes retry only on a tunnel-down error:
+ * a failed fetch may still have reached the server, and resending could post a message twice.
+ */
+async function fetchWithRetry(path, init) {
+  const read = init.method === 'GET';
+  for (let attempt = 0; ; attempt++) {
+    const last = attempt >= RETRY_DELAYS_MS.length;
+    try {
+      const res = await fetch(path, init);
+      const retry = read ? GATEWAY_ERRORS.has(res.status) : res.status === TUNNEL_DOWN;
+      if (last || !retry) return res;
+    } catch {
+      if (last || !read) throw new ApiError('서버에 연결할 수 없습니다. 인터넷 연결을 확인하세요.', 0);
+    }
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
   }
+}
+
+async function request(method, path, body, contentType) {
+  const res = await fetchWithRetry(path, {
+    method,
+    credentials: 'same-origin',
+    headers: body === undefined ? {} : { 'content-type': contentType || 'application/json' },
+    body: body === undefined ? undefined : contentType ? body : JSON.stringify(body),
+  });
   const text = await res.text();
   let data = null;
   try {
