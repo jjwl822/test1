@@ -1,5 +1,7 @@
 package com.family.messenger.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,6 +25,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,6 +50,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -74,6 +80,8 @@ fun ConversationsScreen(
     val users by app.directory.users.collectAsStateWithLifecycle()
     var refreshing by remember { mutableStateOf(false) }
     var showProfile by rememberSaveable { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     Scaffold(
@@ -81,8 +89,22 @@ fun ConversationsScreen(
             TopAppBar(
                 title = { Text("가족 메신저", style = MaterialTheme.typography.titleLarge) },
                 actions = {
-                    Box(Modifier.padding(end = 12.dp).clickable { showProfile = true }) {
+                    Box(Modifier.padding(end = 4.dp).clickable { showProfile = true }) {
                         Avatar(me.displayName, size = 34.dp, imageUrl = app.avatarUrl(users[me.id] ?: me), color = bubbleColor((users[me.id] ?: me).color))
+                    }
+                    Box {
+                        IconButton(onClick = { showSettings = true }) { Icon(Icons.Filled.Settings, contentDescription = "설정") }
+                        DropdownMenu(expanded = showSettings, onDismissRequest = { showSettings = false }) {
+                            DropdownMenuItem(
+                                text = { Text("최신 버전 다운로드") },
+                                onClick = {
+                                    showSettings = false
+                                    // The browser downloads the APK the server hosts; the timestamp skips Cloudflare's cache.
+                                    val apk = app.api.url("/app/family.apk") + "?t=" + System.currentTimeMillis()
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apk)))
+                                },
+                            )
+                        }
                     }
                 },
             )

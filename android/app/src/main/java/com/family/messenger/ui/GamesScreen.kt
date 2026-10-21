@@ -5,10 +5,14 @@ import android.content.Intent
 import android.net.Uri
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -150,6 +154,13 @@ fun GamePlayer(app: FamilyApp, game: GameInfo, onBack: () -> Unit) {
     val url = app.api.url(game.url)
     var webView by remember { mutableStateOf<WebView?>(null) }
 
+    // <input type="file"> in games (e.g. loading a song) needs the app to open the system file picker.
+    var fileCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        fileCallback?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data))
+        fileCallback = null
+    }
+
     // Back goes back inside the game first (if it has pages), then closes it.
     BackHandler {
         val view = webView
@@ -196,6 +207,23 @@ fun GamePlayer(app: FamilyApp, game: GameInfo, onBack: () -> Unit) {
                             if (server != null && request.url.host == server.host) return false
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(request.url.toString())))
                             return true
+                        }
+                    }
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onShowFileChooser(
+                            view: WebView,
+                            callback: ValueCallback<Array<Uri>>,
+                            params: FileChooserParams,
+                        ): Boolean {
+                            fileCallback?.onReceiveValue(null)
+                            fileCallback = callback
+                            return try {
+                                filePicker.launch(params.createIntent())
+                                true
+                            } catch (e: Exception) {
+                                fileCallback = null
+                                false
+                            }
                         }
                     }
                     loadUrl(url)
