@@ -135,6 +135,30 @@ test('"과제" works like "숙제"', async () => {
   assert.ok((await homework(boy)).some((i) => i.text === '과학 탐구 보고서 쓰기'));
 });
 
+test('new homework reaches the child\'s phone over the socket too', async () => {
+  const { mom, dad, kid } = await setup();
+  const heard = [];
+  const sockets = await Promise.all(
+    [kid, dad].map(async (u) => {
+      const socket = new WebSocket(`${base.replace('http', 'ws')}/ws`, { headers: { authorization: `Bearer ${u.token}` } });
+      socket.on('message', (d) => {
+        const e = JSON.parse(d);
+        if (e.type === 'reminder' && e.title.startsWith('📚 새 숙제')) heard.push({ who: u.user.username, ...e });
+      });
+      await new Promise((r) => socket.on('open', r));
+      return socket;
+    }),
+  );
+  await say(mom, '유이숙제\n- 받아쓰기 연습');
+  await server.homeworkIdle();
+  await new Promise((r) => setTimeout(r, 100));
+  sockets.forEach((s) => s.close());
+  assert.deepEqual(
+    heard.map(({ who, target, title, text }) => ({ who, target, title, text })),
+    [{ who: 'kid', target: 'homework', title: '📚 새 숙제 1개', text: '받아쓰기 연습' }],
+  );
+});
+
 test('📢 notices count, a notice pasted again is skipped, items are not added twice', async () => {
   const { mom, kid } = await setup();
   const before = calls.length;

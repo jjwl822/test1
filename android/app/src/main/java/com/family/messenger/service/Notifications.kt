@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
@@ -19,17 +20,33 @@ import com.family.messenger.data.MessageBus
 
 object Notifications {
     private const val CHANNEL_MESSAGES = "messages"
+    private const val CHANNEL_STORIES = "stories"
+    private const val CHANNEL_REMINDERS = "reminders"
     private const val CHANNEL_SERVICE = "connection"
     private const val CHANNEL_CALLS = "calls"
     private const val CHANNEL_ONGOING = "ongoing_call"
     const val SERVICE_ID = 1
     const val CALL_ID = 2
     const val ONGOING_CALL_ID = 3
+    /** How many messages or story lines one notification keeps. */
+    private const val MAX_LINES = 8
+    private const val EXTRA_LINES = "com.family.messenger.lines"
 
     fun createChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_MESSAGES, "새 메시지", NotificationManager.IMPORTANCE_HIGH),
+        )
+        // Separate channels so each kind can be turned off or quietened in the phone's settings.
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_STORIES, "가족 스토리", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "새 스토리, 내 스토리에 달린 댓글"
+            },
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_REMINDERS, "일정·리마인더", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "일정, 숙제, 추억 알림"
+            },
         )
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_SERVICE, "실시간 연결", NotificationManager.IMPORTANCE_MIN).apply {
@@ -131,15 +148,29 @@ object Notifications {
             .setContentIntent(openIntent(context, null, null))
             .build()
 
-    fun showMessage(context: Context, message: Message, isGroup: Boolean) {
+    /**
+     * One notification per chat. New messages are added under the ones still showing (MessagingStyle),
+     * so "엄마: …" and "아빠: …" both stay visible; once it's opened or swiped away it starts fresh.
+     */
+    fun showMessage(context: Context, message: Message, isGroup: Boolean, myName: String) {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return
+        val id = message.conversationId.hashCode()
         val title = if (isGroup) "우리 가족" else message.senderName
-        val text = if (isGroup) "${message.senderName}: ${message.preview}" else message.preview
+        val style = active(context, id)
+            ?.let { NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(it) }
+            ?: NotificationCompat.MessagingStyle(Person.Builder().setName(myName).setKey("me").build())
+        style.setConversationTitle(if (isGroup) title else null)
+        style.setGroupConversation(isGroup)
+        val sender = Person.Builder().setName(message.senderName).setKey(message.senderId.toString()).build()
+        style.addMessage(message.preview, message.createdAt, sender)
+        while (style.messages.size > MAX_LINES) style.messages.removeAt(0)
         val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
             .setSmallIcon(R.drawable.ic_notification)
+            .setStyle(style)
             .setContentTitle(title)
-            .setContentText(text)
+            .setContentText(if (isGroup) "${message.senderName}: ${message.preview}" else message.preview)
+            .setNumber(style.messages.size)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -147,38 +178,53 @@ object Notifications {
             .setContentIntent(openIntent(context, message.conversationId, title))
             .build()
         try {
-            manager.notify(message.conversationId.hashCode(), notification)
+            manager.notify(id, notification)
         } catch (_: SecurityException) {
             // Notification permission was revoked; nothing to show.
         }
     }
 
+    /** New stories and comments, listed in one "가족 스토리" notification until it's opened or swiped away. */
     fun showStory(context: Context, text: String) {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return
-        val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
+        val id = MessageBus.FEED.hashCode()
+        val lines = (active(context, id)?.extras?.getStringArrayList(EXTRA_LINES).orEmpty() + text).takeLast(MAX_LINES)
+        val style = NotificationCompat.InboxStyle().setBigContentTitle("가족 스토리")
+        lines.forEach { style.addLine(it) }
+        if (lines.size > 1) style.setSummaryText("새 소식 ${lines.size}개")
+        val notification = NotificationCompat.Builder(context, CHANNEL_STORIES)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("가족 스토리")
             .setContentText(text)
+            .setStyle(style)
+            .setNumber(lines.size)
+            .addExtras(Bundle().apply { putStringArrayList(EXTRA_LINES, ArrayList(lines)) })
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_SOCIAL)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(openIntent(context, MessageBus.FEED, "가족 스토리"))
             .build()
         try {
-            manager.notify(MessageBus.FEED.hashCode(), notification)
+            manager.notify(id, notification)
         } catch (_: SecurityException) {
         }
     }
+
+    /** The notification with [id] if it's still showing. */
+    private fun active(context: Context, id: Int): Notification? =
+        context.getSystemService(NotificationManager::class.java).activeNotifications
+            .firstOrNull { it.id == id }?.notification
 
     /** Calendar ("내일 일정: 치과") and memory ("1년 전 오늘") reminders. [target] is the tab to open. */
     fun showReminder(context: Context, title: String, text: String, target: String) {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return
-        val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
+        val notification = NotificationCompat.Builder(context, CHANNEL_REMINDERS)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

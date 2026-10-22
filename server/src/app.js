@@ -356,42 +356,12 @@ export function createServer({
       now,
       listsChanged: family.listsChanged,
       notify,
+      sendTo: (userId, payload) => broadcast([userId], payload),
       // Shown in the chat the notice came from, as a quiet line from the parent (like the 📞 call records).
       logMessage: (conversationId, senderId, text) =>
         chat.logMessage(conversationId, senderId, text, participants(db, conversationId) ?? [], { silent: true }),
     });
   }
-
-  // TEMP: app update downloads (debugging in-app updates that don't go through).
-  app.use('/app', (req, res, next) => {
-    const started = Date.now();
-    res.on('close', () => {
-      try {
-        const line = {
-          at: new Date().toISOString(),
-          path: req.originalUrl,
-          status: res.statusCode,
-          range: req.headers.range ?? null,
-          done: res.writableFinished,
-          ms: Date.now() - started,
-          ua: String(req.headers['user-agent'] ?? '').slice(0, 200),
-        };
-        fs.appendFileSync(path.join(dataDir, 'app-requests.log'), `${JSON.stringify(line)}\n`);
-      } catch {}
-    });
-    next();
-  });
-
-  // TEMP: which phones load which game pages (debugging blank games in the Android app).
-  app.use('/games', (req, res, next) => {
-    res.on('finish', () => {
-      try {
-        const line = { at: new Date().toISOString(), path: req.originalUrl, status: res.statusCode, ua: String(req.headers['user-agent'] ?? '').slice(0, 200) };
-        fs.appendFileSync(path.join(dataDir, 'game-requests.log'), `${JSON.stringify(line)}\n`);
-      } catch {}
-    });
-    next();
-  });
 
   // The web app (iPhone / PC). index.html and the service worker are never cached so updates show up.
   app.use(

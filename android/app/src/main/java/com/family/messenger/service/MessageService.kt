@@ -111,7 +111,8 @@ class MessageService : Service() {
                     val message = event.message ?: return
                     MessageBus.messages.emit(message)
                     if (message.senderId != me && MessageBus.activeConversation.value != message.conversationId) {
-                        Notifications.showMessage(context, message, message.conversationId == "family")
+                        val myName = app.session.auth.value?.user?.displayName ?: "나"
+                        Notifications.showMessage(context, message, message.conversationId == "family", myName)
                     }
                 }
                 "messageUpdated" -> event.message?.let { MessageBus.messageUpdates.emit(it) }

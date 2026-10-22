@@ -152,7 +152,7 @@ export function homeworkPeople(db, { children, assignee } = {}) {
  * or a pasted notice followed by "유이숙제", both work. A notice pasted again is skipped, and items
  * already on a child's list aren't added twice. A quiet line in the same chat says what was added.
  */
-export function createHomework({ db, authors, children, assignee, extract, now, listsChanged, notify, logMessage,
+export function createHomework({ db, authors, children, assignee, extract, now, listsChanged, notify, sendTo, logMessage,
   quietMs = QUIET, log = console }) {
   const userId = (username) => db.prepare('SELECT id FROM users WHERE username = ?').get(username)?.id;
   const people = () => homeworkPeople(db, { children, assignee });
@@ -269,7 +269,11 @@ export function createHomework({ db, authors, children, assignee, extract, now, 
     for (const kid of kids) {
       const mine = added.filter((i) => i.kid?.id === kid.id);
       if (mine.length) {
-        notify([kid.id], { title: `📚 새 숙제 ${mine.length}개`, body: mine.map((i) => i.text).join(', '), url: '/#/homework', tag: `homework-${job}` });
+        const title = `📚 새 숙제 ${mine.length}개`;
+        const body = mine.map((i) => i.text).join(', ');
+        // The Android app hears about it through its socket, the web app through push.
+        sendTo?.(kid.id, { type: 'reminder', target: 'homework', title, text: body });
+        notify([kid.id], { title, body, url: '/#/homework', tag: `homework-${job}` });
       }
     }
     return added;
