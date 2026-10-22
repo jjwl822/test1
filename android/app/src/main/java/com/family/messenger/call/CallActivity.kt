@@ -195,17 +195,23 @@ private fun CallScreen(
     val local by CallManager.localVideo.collectAsState()
     val remote by CallManager.remoteVideo.collectAsState()
     val active = state.status == CallManager.Status.ACTIVE
-    val showRemote = state.video && remote != null && active
+    // The other person's camera off: their photo instead of a black picture.
+    val showRemote = state.video && remote != null && active && !state.peerCameraOff
+    val note = listOfNotNull(
+        "🔇 상대방이 음소거했어요".takeIf { active && state.peerMuted },
+        "상대방이 카메라를 껐어요".takeIf { active && state.video && state.peerCameraOff },
+        "🎧 이어폰으로 듣는 중".takeIf { state.headset && state.inCall && state.status != CallManager.Status.INCOMING },
+    ).joinToString(" · ")
 
     Box(Modifier.fillMaxSize().background(Color(0xFF111111))) {
         // While ringing, my camera fills the screen (dimmed); once connected it moves to the corner.
         if (showRemote) {
             VideoView(remote, mirror = false, Modifier.fillMaxSize())
-        } else if (state.video && local != null && !state.cameraOff) {
+        } else if (!active && state.video && local != null && !state.cameraOff) {
             VideoView(local, mirror = true, Modifier.fillMaxSize())
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
         }
-        if (showRemote && local != null && !state.cameraOff) {
+        if (active && state.video && local != null && !state.cameraOff) {
             VideoView(
                 local,
                 mirror = true,
@@ -231,6 +237,18 @@ private fun CallScreen(
             Text(peerName, color = Color.White, fontSize = if (showRemote) 18.sp else 28.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
             Text(statusText(state), color = Color.White.copy(alpha = 0.8f), fontSize = 15.sp)
+            if (note.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    note,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
             Spacer(Modifier.weight(1f))
 
             if (state.status == CallManager.Status.INCOMING) {
@@ -292,7 +310,7 @@ private fun statusText(state: CallManager.State): String {
         CallManager.Status.OUTGOING -> state.message ?: "$kind 거는 중…"
         CallManager.Status.INCOMING -> "$kind 전화가 왔어요"
         CallManager.Status.CONNECTING -> "연결하는 중…"
-        CallManager.Status.ACTIVE -> {
+        CallManager.Status.ACTIVE -> if (state.reconnecting) "연결이 불안정해요. 다시 연결하는 중…" else {
             val seconds = ((now - (state.startedAt ?: now)) / 1000).coerceAtLeast(0)
             "%d:%02d".format(seconds / 60, seconds % 60)
         }

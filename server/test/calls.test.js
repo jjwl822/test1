@@ -19,6 +19,7 @@ before(async () => {
     familyCode: 'c',
     dataDir,
     ringSeconds: 0.3,
+    callDropSeconds: 0.3,
     pushSend: async (_sub, data) => pushes.push(JSON.parse(data)),
     turn: { keyId: 'key123', token: 'secret' },
     // Stands in for Cloudflare's TURN API.
@@ -189,6 +190,53 @@ test('declined, cancelled and unanswered calls', async () => {
   momPhone.close();
   await kidPhone.next('cancel');
   kidPhone.close();
+});
+
+const login = async (username) =>
+  (await fetch(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password: 'pass1234' }) })).json();
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test('during a call: reconnecting after a network change, and mute / camera state', async () => {
+  const mom = await login('mom');
+  const dad = await login('dad');
+  const momPhone = await device(mom.token);
+  let dadPhone = await device(dad.token);
+  momPhone.send({ action: 'invite', callId: 'r1', to: dad.user.id, video: true, sdp: 'o' });
+  await dadPhone.next('invite');
+
+  // Not before the call is answered.
+  momPhone.send({ action: 'renegotiate', callId: 'r1', kind: 'offer', sdp: 'too-early' });
+  dadPhone.send({ action: 'accept', callId: 'r1', sdp: 'a' });
+  await momPhone.next('accept');
+
+  momPhone.send({ action: 'renegotiate', callId: 'r1', kind: 'offer', sdp: 'restart-offer' });
+  const offer = await dadPhone.next('renegotiate');
+  assert.deepEqual([offer.kind, offer.sdp], ['offer', 'restart-offer']);
+  dadPhone.send({ action: 'renegotiate', callId: 'r1', kind: 'answer', sdp: 'restart-answer' });
+  assert.equal((await momPhone.next('renegotiate')).sdp, 'restart-answer');
+  assert.ok(!momPhone.events.some((e) => e.sdp === 'too-early') && !dadPhone.events.some((e) => e.sdp === 'too-early'));
+
+  dadPhone.send({ action: 'media', callId: 'r1', muted: true, cameraOff: false });
+  const media = await momPhone.next('media');
+  assert.deepEqual([media.muted, media.cameraOff], [true, false]);
+
+  // Dad's phone drops off the server and comes back in time: the call goes on.
+  dadPhone.close();
+  await wait(50);
+  dadPhone = await device(dad.token);
+  await wait(400);
+  assert.ok(!momPhone.events.some((e) => e.action === 'end'));
+
+  // This time it doesn't come back (app killed): the call ends instead of staying "busy".
+  dadPhone.close();
+  await momPhone.next('end');
+  assert.match(await lastMessage(mom.token, mom.user.id, dad.user.id), /^📞 영상통화 \d+초$/);
+  const kid = await login('kid');
+  const kidPhone = await device(kid.token);
+  kidPhone.send({ action: 'invite', callId: 'r2', to: mom.user.id, video: false, sdp: 'o' });
+  await momPhone.next('invite');
+  kidPhone.send({ action: 'cancel', callId: 'r2' });
+  [momPhone, kidPhone].forEach((d) => d.close());
 });
 
 test('relay (TURN) credentials come from Cloudflare, cached, without port 53', async () => {

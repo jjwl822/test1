@@ -7,7 +7,10 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.media.ToneGenerator
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
+import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -74,8 +77,14 @@ object CallManager {
         val muted: Boolean = false,
         val cameraOff: Boolean = false,
         val speaker: Boolean = false,
+        /** Sound is going to a Bluetooth / wired headset. */
+        val headset: Boolean = false,
         val startedAt: Long? = null,
         val message: String? = null,
+        /** The connection dropped (e.g. Wi-Fi → LTE) and is being restored. */
+        val reconnecting: Boolean = false,
+        val peerMuted: Boolean = false,
+        val peerCameraOff: Boolean = false,
     ) {
         val inCall: Boolean get() = status != Status.IDLE && status != Status.ENDED
     }
@@ -105,14 +114,50 @@ object CallManager {
     private var ringer: MediaPlayer? = null
     private var ringback: ToneGenerator? = null
     private var endJob: Job? = null
+    /** I started this call. Only the caller restarts a dropped connection, so offers never cross. */
+    private var isCaller = false
+    private var retryJob: Job? = null
+    private var giveUpJob: Job? = null
+    private const val GIVE_UP_MS = 30_000L
+    private val audio by lazy { CallAudio(app).apply { onHeadsetChange = { on -> if (on != _state.value.headset) set { it.copy(headset = on) } } } }
+    private val proximity by lazy {
+        app.getSystemService(PowerManager::class.java)
+            .takeIf { it.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK) }
+            ?.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "family:call")
+            ?.apply { setReferenceCounted(false) }
+    }
 
     fun init(app: FamilyApp) {
         this.app = app
+        // A network came back (or a new one, like LTE after Wi-Fi): reconnect a dropped call right away.
+        runCatching {
+            app.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(
+                object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        scope.launch { reconnectNow() }
+                    }
+                },
+            )
+        }
     }
 
     private fun set(transform: (State) -> State) {
         _state.value = transform(_state.value)
         Notifications.updateCall(app, _state.value)
+        updateProximity()
+    }
+
+    /**
+     * Turns the screen off while the phone is held to the ear (a voice call on the earpiece), so a
+     * cheek can't press buttons.
+     */
+    private fun updateProximity() {
+        val s = _state.value
+        val atEar = !s.video && !s.speaker && !s.headset &&
+            (s.status == Status.OUTGOING || s.status == Status.CONNECTING || s.status == Status.ACTIVE)
+        val lock = proximity ?: return
+        if (atEar && !lock.isHeld) lock.acquire(4 * 60 * 60 * 1000L)
+        if (!atEar && lock.isHeld) lock.release(PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY)
     }
 
     private fun signal(action: String, extra: Map<String, Any?> = emptyMap()): Boolean {
@@ -215,12 +260,20 @@ object CallManager {
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
             scope.launch {
+                val active = _state.value.status == Status.ACTIVE
                 when (newState) {
-                    PeerConnection.PeerConnectionState.CONNECTED -> if (_state.value.status != Status.ACTIVE) {
-                        stopSounds()
-                        set { it.copy(status = Status.ACTIVE, startedAt = System.currentTimeMillis(), message = null) }
+                    PeerConnection.PeerConnectionState.CONNECTED -> {
+                        stopRetrying()
+                        if (!active) {
+                            stopSounds()
+                            set { it.copy(status = Status.ACTIVE, startedAt = System.currentTimeMillis(), message = null) }
+                            sendMedia()
+                        } else if (_state.value.reconnecting) {
+                            set { it.copy(reconnecting = false) }
+                        }
                     }
-                    PeerConnection.PeerConnectionState.FAILED -> hangUp("연결이 끊겼어요.")
+                    PeerConnection.PeerConnectionState.DISCONNECTED -> if (active) lostConnection(failed = false)
+                    PeerConnection.PeerConnectionState.FAILED -> if (active) lostConnection(failed = true) else hangUp("연결이 끊겼어요.")
                     else -> Unit
                 }
             }
@@ -237,14 +290,17 @@ object CallManager {
         override fun onRenegotiationNeeded() = Unit
     }
 
-    private suspend fun PeerConnection.create(offer: Boolean): SessionDescription = suspendCancellableCoroutine { cont ->
+    private suspend fun PeerConnection.create(offer: Boolean, iceRestart: Boolean = false): SessionDescription = suspendCancellableCoroutine { cont ->
         val observer = object : SdpObserver {
             override fun onCreateSuccess(sdp: SessionDescription) = cont.resume(sdp)
             override fun onCreateFailure(error: String) = cont.resumeWithException(IllegalStateException(error))
             override fun onSetSuccess() = Unit
             override fun onSetFailure(error: String) = Unit
         }
-        if (offer) createOffer(observer, MediaConstraints()) else createAnswer(observer, MediaConstraints())
+        val constraints = MediaConstraints().apply {
+            if (iceRestart) mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
+        }
+        if (offer) createOffer(observer, constraints) else createAnswer(observer, constraints)
     }
 
     private suspend fun PeerConnection.apply(sdp: SessionDescription, local: Boolean) = suspendCancellableCoroutine { cont ->
@@ -275,23 +331,79 @@ object CallManager {
         pendingCandidates.clear()
     }
 
+    // ---- Keeping the call up when the network changes (Wi-Fi ↔ LTE) --------------------------
+
+    /**
+     * The connection dropped. "Disconnected" often recovers by itself within seconds; if not (or once
+     * it's "failed"), the caller restarts it over the new network routes (ICE restart), retrying until
+     * it works or [GIVE_UP_MS] passes.
+     */
+    private fun lostConnection(failed: Boolean) {
+        if (!_state.value.reconnecting) set { it.copy(reconnecting = true) }
+        if (giveUpJob == null) {
+            giveUpJob = scope.launch {
+                delay(GIVE_UP_MS)
+                giveUpJob = null
+                hangUp("연결이 끊겼어요.")
+            }
+        }
+        if (!isCaller || retryJob != null) return
+        retryJob = scope.launch {
+            delay(if (failed) 0 else 2000)
+            while (true) {
+                restartIce()
+                delay(4000)
+            }
+        }
+    }
+
+    private fun stopRetrying() {
+        retryJob?.cancel()
+        retryJob = null
+        giveUpJob?.cancel()
+        giveUpJob = null
+    }
+
+    /** A network or the server connection came back: don't wait for the next retry. */
+    private suspend fun reconnectNow() {
+        val s = _state.value
+        if (s.status == Status.ACTIVE && s.reconnecting && isCaller) restartIce()
+    }
+
+    private suspend fun restartIce() {
+        val peer = pc ?: return
+        if (peer.signalingState() != PeerConnection.SignalingState.STABLE) return
+        runCatching {
+            val offer = peer.create(offer = true, iceRestart = true)
+            peer.apply(offer, local = true)
+            signal("renegotiate", mapOf("kind" to "offer", "sdp" to offer.description))
+        }.onFailure { Log.w(TAG, "ICE restart", it) }
+    }
+
+    private suspend fun onRenegotiate(msg: CallSignal) {
+        val peer = pc ?: return
+        val sdp = msg.sdp ?: return
+        runCatching {
+            if (msg.kind == "offer") {
+                peer.apply(SessionDescription(SessionDescription.Type.OFFER, sdp), local = false)
+                val answer = peer.create(offer = false)
+                peer.apply(answer, local = true)
+                signal("renegotiate", mapOf("kind" to "answer", "sdp" to answer.description))
+            } else if (peer.signalingState() == PeerConnection.SignalingState.HAVE_LOCAL_OFFER) {
+                peer.apply(SessionDescription(SessionDescription.Type.ANSWER, sdp), local = false)
+            }
+        }.onFailure { Log.w(TAG, "renegotiate", it) }
+    }
+
+    /** Tells the other side whether my microphone / camera is off, so their screen can show it. */
+    private fun sendMedia() {
+        val s = _state.value
+        signal("media", mapOf("muted" to s.muted, "cameraOff" to s.cameraOff))
+    }
+
     // ---- Sound -----------------------------------------------------------------------------
 
     private fun audioManager() = app.getSystemService(AudioManager::class.java)
-
-    @Suppress("DEPRECATION")
-    private fun useCallAudio(speaker: Boolean) {
-        val am = audioManager()
-        am.mode = AudioManager.MODE_IN_COMMUNICATION
-        am.isSpeakerphoneOn = speaker
-    }
-
-    @Suppress("DEPRECATION")
-    private fun resetAudio() {
-        val am = audioManager()
-        am.isSpeakerphoneOn = false
-        am.mode = AudioManager.MODE_NORMAL
-    }
 
     private fun vibrator(): Vibrator =
         if (Build.VERSION.SDK_INT >= 31) {
@@ -347,11 +459,14 @@ object CallManager {
         if (_state.value.inCall) return
         endJob?.cancel()
         val callId = "${System.currentTimeMillis().toString(36)}-${(0..Int.MAX_VALUE).random().toString(36)}"
-        set { State(status = Status.OUTGOING, callId = callId, peer = peer, video = video, speaker = video) }
+        isCaller = true
+        // Video calls use the loudspeaker, unless a headset is connected.
+        val speaker = video && !audio.headsetConnected()
+        set { State(status = Status.OUTGOING, callId = callId, peer = peer, video = video, speaker = speaker) }
         scope.launch {
             try {
                 startMedia(video)
-                useCallAudio(speaker = video)
+                audio.start(speaker)
                 val peerConnection = makePeer().also { pc = it }
                 val offer = peerConnection.create(offer = true)
                 peerConnection.apply(offer, local = true)
@@ -369,11 +484,12 @@ object CallManager {
         if (_state.value.status != Status.INCOMING) return
         stopSounds()
         val video = _state.value.video
-        set { it.copy(status = Status.CONNECTING, speaker = video) }
+        val speaker = video && !audio.headsetConnected()
+        set { it.copy(status = Status.CONNECTING, speaker = speaker) }
         scope.launch {
             try {
                 startMedia(video)
-                useCallAudio(speaker = video)
+                audio.start(speaker)
                 val peerConnection = makePeer().also { pc = it }
                 peerConnection.apply(SessionDescription(SessionDescription.Type.OFFER, offerSdp), local = false)
                 flushCandidates()
@@ -407,27 +523,29 @@ object CallManager {
         val muted = !_state.value.muted
         audioTrack?.setEnabled(!muted)
         set { it.copy(muted = muted) }
+        sendMedia()
     }
 
     fun toggleCamera() {
         val off = !_state.value.cameraOff
         _localVideo.value?.setEnabled(!off)
         set { it.copy(cameraOff = off) }
+        sendMedia()
     }
 
     fun switchCamera() {
         capturer?.switchCamera(null)
     }
 
-    @Suppress("DEPRECATION")
     fun toggleSpeaker() {
         val on = !_state.value.speaker
-        audioManager().isSpeakerphoneOn = on
         set { it.copy(speaker = on) }
+        audio.setSpeaker(on)
     }
 
     private fun ring(callId: String, from: CallPeer, video: Boolean, sdp: String, candidates: List<JsonObject>) {
         endJob?.cancel()
+        isCaller = false
         offerSdp = sdp
         pendingCandidates.clear()
         candidates.mapNotNullTo(pendingCandidates, ::candidateOf)
@@ -438,7 +556,11 @@ object CallManager {
 
     /** Called when the live connection (re)opens: a call may be ringing that we missed. */
     fun checkPending() {
-        if (!::app.isInitialized || _state.value.inCall) return
+        if (!::app.isInitialized) return
+        if (_state.value.inCall) {
+            scope.launch { reconnectNow() }
+            return
+        }
         scope.launch {
             val pending = runCatching { app.api.pendingCall() }.getOrNull() ?: return@launch
             if (!_state.value.inCall) ring(pending.callId, pending.from, pending.video, pending.sdp, pending.candidates)
@@ -467,6 +589,8 @@ object CallManager {
                 finish("다른 기기에서 받았어요.")
             }
             "offline" -> if (mine) set { it.copy(message = "상대방이 지금 연결되어 있지 않아요. 알림을 보냈어요.") }
+            "renegotiate" -> if (mine && current.status == Status.ACTIVE) onRenegotiate(signal)
+            "media" -> if (mine) set { it.copy(peerMuted = signal.muted, peerCameraOff = signal.cameraOff) }
             else -> if (mine && current.inCall) {
                 finish(
                     when (signal.action) {
@@ -485,6 +609,8 @@ object CallManager {
     /** Releases the call and shows the message briefly before the call screen closes. */
     private fun finish(message: String) {
         stopSounds()
+        stopRetrying()
+        isCaller = false
         pc?.dispose()
         pc = null
         runCatching { capturer?.stopCapture() }
@@ -503,8 +629,8 @@ object CallManager {
         audioSource = null
         pendingCandidates.clear()
         offerSdp = null
-        resetAudio()
-        set { it.copy(status = Status.ENDED, message = message) }
+        audio.stop()
+        set { it.copy(status = Status.ENDED, message = message, reconnecting = false) }
         endJob?.cancel()
         endJob = scope.launch {
             delay(1800)

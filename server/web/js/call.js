@@ -14,6 +14,10 @@ let localStream = null;
 let pendingCandidates = [];
 let ringTone = null;
 let endTimer = null;
+/** While the connection is lost: retrying it, and giving up after a while. */
+let retryTimer = null;
+let giveUpTimer = null;
+const GIVE_UP_MS = 30_000;
 
 function set(patch) {
   state = { ...state, ...patch };
@@ -90,12 +94,80 @@ async function makePeer() {
   peer.ontrack = (e) => set({ remoteStream: e.streams[0] });
   peer.onconnectionstatechange = () => {
     if (peer !== pc) return;
-    if (peer.connectionState === 'connected' && state.status !== 'active') set({ status: 'active', startedAt: Date.now() });
-    if (peer.connectionState === 'failed') hangUp('연결이 끊겼어요.');
+    const s = peer.connectionState;
+    if (s === 'connected') {
+      stopRetrying();
+      if (state.status !== 'active') {
+        set({ status: 'active', startedAt: Date.now() });
+        sendMedia();
+      } else if (state.reconnecting) set({ reconnecting: false });
+    }
+    if ((s === 'disconnected' || s === 'failed') && state.status === 'active') lostConnection(s === 'failed');
   };
   localStream.getTracks().forEach((t) => peer.addTrack(t, localStream));
   return peer;
 }
+
+// ---- Keeping the call up when the network changes (Wi-Fi ↔ LTE) ------------------------------
+
+/**
+ * The connection dropped. "disconnected" often comes back by itself within a few seconds; if not
+ * (or once it's "failed"), the caller restarts the connection over new network routes (ICE restart)
+ * and keeps trying until it works or [GIVE_UP_MS] passes. Only the caller restarts, so both sides
+ * never send offers at once.
+ */
+function lostConnection(failed) {
+  if (!state.reconnecting) set({ reconnecting: true });
+  if (!giveUpTimer) giveUpTimer = setTimeout(() => hangUp('연결이 끊겼어요.'), GIVE_UP_MS);
+  if (!state.isCaller || retryTimer) return;
+  const attempt = () => {
+    retryTimer = setTimeout(attempt, 4000);
+    restartIce();
+  };
+  retryTimer = setTimeout(attempt, failed ? 0 : 2000);
+}
+
+function stopRetrying() {
+  clearTimeout(retryTimer);
+  clearTimeout(giveUpTimer);
+  retryTimer = null;
+  giveUpTimer = null;
+}
+
+async function restartIce() {
+  if (!pc || pc.signalingState !== 'stable') return;
+  try {
+    const offer = await pc.createOffer({ iceRestart: true });
+    await pc.setLocalDescription(offer);
+    signal('renegotiate', { kind: 'offer', sdp: offer.sdp });
+  } catch {
+    // tried again on the next attempt
+  }
+}
+
+async function onRenegotiate(msg) {
+  if (!pc) return;
+  try {
+    if (msg.kind === 'offer') {
+      await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      signal('renegotiate', { kind: 'answer', sdp: answer.sdp });
+    } else if (pc.signalingState === 'have-local-offer') {
+      await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+    }
+  } catch {
+    // the next restart attempt starts over
+  }
+}
+
+// The phone got a network back (e.g. walked out of Wi-Fi range onto LTE): try right away.
+window.addEventListener('online', () => {
+  if (state.status === 'active' && state.isCaller && pc?.connectionState !== 'connected') restartIce();
+});
+
+/** Tells the other side whether my microphone / camera is off, so their screen can show it. */
+const sendMedia = () => signal('media', { muted: Boolean(state.muted), cameraOff: Boolean(state.cameraOff) });
 
 async function addCandidate(candidate) {
   if (pc?.remoteDescription) await pc.addIceCandidate(candidate).catch(() => {});
@@ -110,6 +182,7 @@ async function flushCandidates() {
 
 function cleanup() {
   stopTone();
+  stopRetrying();
   pc?.close();
   pc = null;
   localStream?.getTracks().forEach((t) => t.stop());
@@ -127,12 +200,24 @@ function finish(message) {
 
 // ---- Actions ------------------------------------------------------------------------------------
 
+/** What a new call starts with. */
+const fresh = () => ({
+  muted: false,
+  cameraOff: false,
+  peerMuted: false,
+  peerCameraOff: false,
+  reconnecting: false,
+  remoteStream: null,
+  message: null,
+  startedAt: null,
+});
+
 /** Calls [peer] ({ id, displayName }). */
 export async function startCall(peer, video) {
   if (state.status !== 'idle' && state.status !== 'ended') return;
   clearTimeout(endTimer);
   const callId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  set({ status: 'outgoing', callId, peer, video, muted: false, cameraOff: false, remoteStream: null, message: null, startedAt: null });
+  set({ ...fresh(), status: 'outgoing', callId, peer, video, isCaller: true });
   try {
     localStream = await media(video);
     set({ localStream });
@@ -182,12 +267,14 @@ export function toggleMute() {
   const muted = !state.muted;
   localStream?.getAudioTracks().forEach((t) => (t.enabled = !muted));
   set({ muted });
+  sendMedia();
 }
 
 export function toggleCamera() {
   const cameraOff = !state.cameraOff;
   localStream?.getVideoTracks().forEach((t) => (t.enabled = !cameraOff));
   set({ cameraOff });
+  sendMedia();
 }
 
 /** Front ↔ back camera. */
@@ -211,7 +298,7 @@ export async function switchCamera() {
 function ring(callId, from, video, sdp, candidates = []) {
   clearTimeout(endTimer);
   pendingCandidates = [...candidates];
-  set({ status: 'incoming', callId, peer: from, video, offerSdp: sdp, muted: false, cameraOff: false, remoteStream: null, message: null, startedAt: null });
+  set({ ...fresh(), status: 'incoming', callId, peer: from, video, offerSdp: sdp, isCaller: false });
   signal('ringing');
   startTone('incoming');
 }
@@ -251,6 +338,12 @@ onLive('call', async (msg) => {
       return;
     case 'offline':
       if (mine) set({ message: '상대방이 지금 연결되어 있지 않아요. 알림을 보냈어요.' });
+      return;
+    case 'renegotiate':
+      if (mine && state.status === 'active') await onRenegotiate(msg);
+      return;
+    case 'media':
+      if (mine) set({ peerMuted: Boolean(msg.muted), peerCameraOff: Boolean(msg.cameraOff) });
       return;
     default:
       if (!mine || state.status === 'idle' || state.status === 'ended') return;
@@ -306,10 +399,12 @@ export function CallScreen() {
     outgoing: call.message ?? '연결 중…',
     incoming: `${call.video ? '영상통화' : '음성통화'}가 왔어요`,
     connecting: '연결 중…',
-    active: clock,
+    active: call.reconnecting ? '연결이 불안정해요. 다시 연결하는 중…' : clock,
     ended: call.message,
   }[call.status];
-  const showRemoteVideo = call.video && call.remoteStream && call.status === 'active';
+  // The other person's camera off: their photo instead of a black picture.
+  const showRemoteVideo = call.video && call.remoteStream && call.status === 'active' && !call.peerCameraOff;
+  const note = call.status === 'active' && [call.peerMuted && '🔇 상대방이 음소거했어요', call.video && call.peerCameraOff && '상대방이 카메라를 껐어요'].filter(Boolean).join(' · ');
 
   return html`<div class="call">
     ${call.remoteStream && html`<${Video} stream=${call.remoteStream} cls=${showRemoteVideo ? 'remote' : 'hidden'} />`}
@@ -317,11 +412,12 @@ export function CallScreen() {
     call.localStream &&
     !call.cameraOff &&
     // My camera fills the screen while ringing, then moves to the corner once connected.
-    html`<${Video} stream=${call.localStream} muted mirror cls=${showRemoteVideo ? 'local' : 'remote dim'} />`}
+    html`<${Video} stream=${call.localStream} muted mirror cls=${call.status === 'active' ? 'local' : 'remote dim'} />`}
     <div class=${`call-info ${showRemoteVideo ? 'over-video' : ''}`}>
       ${!showRemoteVideo && html`<${Avatar} name=${peer.displayName ?? ''} url=${avatarUrlOf(peer.id)} color=${colorOf(peer.id)} size=${120} ring />`}
       <h2>${peer.displayName}</h2>
       <p>${statusText}</p>
+      ${note && html`<p class="call-note">${note}</p>`}
     </div>
     <div class="call-actions">
       ${call.status === 'incoming'

@@ -20,6 +20,11 @@ data class CallSignal(
     val candidate: JsonObject? = null,
     val except: String? = null,
     val message: String? = null,
+    /** On "renegotiate": "offer" or "answer". */
+    val kind: String? = null,
+    /** On "media": the other person's microphone / camera is off. */
+    val muted: Boolean = false,
+    val cameraOff: Boolean = false,
 )
 
 /** A call still ringing for me, e.g. after the app reconnects. */

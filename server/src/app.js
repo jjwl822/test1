@@ -97,6 +97,7 @@ export function createServer({
   turn,
   fetchImpl,
   ringSeconds,
+  callDropSeconds,
   // { authors: ['mom'], children: { 유호: 'uho', 유이: 'uiui' }, assignee: 'uiui', extract(text, today, existing) }
   // — homework notices from chat → 📚 list ("유호숙제" picks the child, assignee is the default)
   homework,
@@ -329,6 +330,7 @@ export function createServer({
     turn,
     fetchImpl,
     ringSeconds,
+    dropSeconds: callDropSeconds,
   });
   registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes: Object.keys(MEDIA_TYPES), now, notify });
   registerGameRoutes(app, { db, auth, gamesDir, errorLog: path.join(dataDir, 'game-errors.log') });

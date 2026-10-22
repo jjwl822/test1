@@ -10,6 +10,8 @@ const DEFAULT_STUN = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.goo
  *
  * Client → server messages: { type: 'call', action, callId, ... }
  *   invite { to, video, sdp }   accept { sdp }   ringing   decline   cancel   end   ice { candidate }
+ *   renegotiate { sdp, kind: 'offer' | 'answer' }  (reconnecting after the network changed)
+ *   media { muted, cameraOff }  (so the other side can show it)
  * Server → client: the same shape, plus `from` on invite, and busy / missed / answered-elsewhere.
  */
 export function createCalls({
@@ -24,6 +26,9 @@ export function createCalls({
   fetchImpl = fetch,
   now = Date.now,
   ringSeconds = 45,
+  // How long someone in a call may be off the server (a phone switching networks reconnects well
+  // within this) before the call is ended, so it doesn't stay "busy" after an app was killed.
+  dropSeconds = 90,
 }) {
   /** callId -> { id, from, to, video, sdp, callerCandidates, state, startedAt, answeredAt, timer } */
   const calls = new Map();
@@ -45,6 +50,7 @@ export function createCalls({
   /** Ends a call and writes what happened into the 1:1 chat. */
   function finish(call, outcome) {
     clearTimeout(call.timer);
+    clearTimeout(call.dropTimer);
     calls.delete(call.id);
     const text =
       outcome === 'ended'
@@ -122,16 +128,36 @@ export function createCalls({
         if (call.from === me && call.state === 'ringing') call.callerCandidates.push(msg.candidate);
         send(other(call, me), call, 'ice', { candidate: msg.candidate });
         return;
+      case 'renegotiate':
+        if (!call || call.state !== 'active' || (call.from !== me && call.to !== me)) return;
+        if (typeof msg.sdp !== 'string' || (msg.kind !== 'offer' && msg.kind !== 'answer')) return;
+        send(other(call, me), call, 'renegotiate', { sdp: msg.sdp, kind: msg.kind });
+        return;
+      case 'media':
+        if (!call || (call.from !== me && call.to !== me)) return;
+        send(other(call, me), call, 'media', { muted: Boolean(msg.muted), cameraOff: Boolean(msg.cameraOff) });
+        return;
       default:
     }
   }
 
-  /** Someone lost their last connection: a call they were ringing out on is cancelled. */
+  /**
+   * Someone lost their last connection: a call they were ringing out on is cancelled, and a call
+   * they're in is ended if they don't come back within [dropSeconds].
+   */
   function onDisconnect(userId) {
     for (const call of [...calls.values()]) {
       if (call.state === 'ringing' && call.from === userId) {
         send(call.to, call, 'cancel');
         finish(call, 'missed');
+      } else if (call.state === 'active' && (call.from === userId || call.to === userId)) {
+        clearTimeout(call.dropTimer);
+        call.dropTimer = setTimeout(() => {
+          if (calls.get(call.id) !== call || isOnline(userId)) return;
+          send(other(call, userId), call, 'end');
+          finish(call, 'ended');
+        }, dropSeconds * 1000);
+        call.dropTimer.unref?.();
       }
     }
   }
@@ -191,7 +217,10 @@ export function createCalls({
     onDisconnect,
     stop: () => {
       clearInterval(sweep);
-      for (const call of calls.values()) clearTimeout(call.timer);
+      for (const call of calls.values()) {
+        clearTimeout(call.timer);
+        clearTimeout(call.dropTimer);
+      }
     },
   };
 }
