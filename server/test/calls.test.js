@@ -201,12 +201,12 @@ test('during a call: reconnecting after a network change, and mute / camera stat
   const dad = await login('dad');
   const momPhone = await device(mom.token);
   let dadPhone = await device(dad.token);
-  momPhone.send({ action: 'invite', callId: 'r1', to: dad.user.id, video: true, sdp: 'o' });
+  momPhone.send({ action: 'invite', callId: 'r1', to: dad.user.id, video: true, sdp: 'o', v: 2 });
   await dadPhone.next('invite');
 
   // Not before the call is answered.
   momPhone.send({ action: 'renegotiate', callId: 'r1', kind: 'offer', sdp: 'too-early' });
-  dadPhone.send({ action: 'accept', callId: 'r1', sdp: 'a' });
+  dadPhone.send({ action: 'accept', callId: 'r1', sdp: 'a', v: 2 });
   await momPhone.next('accept');
 
   momPhone.send({ action: 'renegotiate', callId: 'r1', kind: 'offer', sdp: 'restart-offer' });
@@ -237,6 +237,27 @@ test('during a call: reconnecting after a network change, and mute / camera stat
   await momPhone.next('invite');
   kidPhone.send({ action: 'cancel', callId: 'r2' });
   [momPhone, kidPhone].forEach((d) => d.close());
+});
+
+test('an older app that does not know the new signals never gets them (it would hang up)', async () => {
+  const mom = await login('mom');
+  const kid = await login('kid');
+  const momPhone = await device(mom.token);
+  const oldKidPhone = await device(kid.token);
+  momPhone.send({ action: 'invite', callId: 'o1', to: kid.user.id, video: true, sdp: 'o', v: 2 });
+  await oldKidPhone.next('invite');
+  oldKidPhone.send({ action: 'accept', callId: 'o1', sdp: 'a' }); // no v: 2
+  await momPhone.next('accept');
+  momPhone.send({ action: 'media', callId: 'o1', muted: true, cameraOff: true });
+  momPhone.send({ action: 'renegotiate', callId: 'o1', kind: 'offer', sdp: 'restart' });
+  // The old app still tells the new one nothing new, but the new one hears the old one fine.
+  oldKidPhone.send({ action: 'ice', callId: 'o1', candidate: { candidate: 'c' } });
+  await momPhone.next('ice');
+  await wait(100);
+  assert.deepEqual(oldKidPhone.events.map((e) => e.action).filter((a) => a === 'media' || a === 'renegotiate'), []);
+  momPhone.send({ action: 'end', callId: 'o1' });
+  await oldKidPhone.next('end');
+  [momPhone, oldKidPhone].forEach((d) => d.close());
 });
 
 test('relay (TURN) credentials come from Cloudflare, cached, without port 53', async () => {

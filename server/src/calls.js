@@ -13,6 +13,9 @@ const DEFAULT_STUN = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.goo
  *   renegotiate { sdp, kind: 'offer' | 'answer' }  (reconnecting after the network changed)
  *   media { muted, cameraOff }  (so the other side can show it)
  * Server → client: the same shape, plus `from` on invite, and busy / missed / answered-elsewhere.
+ *
+ * renegotiate and media only go to a side that said it understands them (`v: 2` on invite /
+ * accept): older Android apps end the call on a signal they don't know.
  */
 export function createCalls({
   db,
@@ -73,7 +76,8 @@ export function createCalls({
         }
         const fresh = { id: callId, from: me, to, video: Boolean(msg.video) };
         if (inCall(me) || inCall(to)) return send(me, fresh, 'busy');
-        Object.assign(fresh, { sdp: msg.sdp, callerCandidates: [], state: 'ringing', startedAt: now() });
+        Object.assign(fresh, { sdp: msg.sdp, callerCandidates: [], state: 'ringing', startedAt: now(), v2: new Set() });
+        if (msg.v === 2) fresh.v2.add(me);
         calls.set(callId, fresh);
         fresh.timer = setTimeout(() => {
           if (calls.get(callId)?.state !== 'ringing') return;
@@ -101,6 +105,7 @@ export function createCalls({
         if (!call || call.to !== me || call.state !== 'ringing' || typeof msg.sdp !== 'string') return;
         call.state = 'active';
         call.answeredAt = now();
+        if (msg.v === 2) call.v2.add(me);
         clearTimeout(call.timer);
         send(call.from, call, 'accept', { sdp: msg.sdp });
         // Stop the ringing on the callee's other phones / tabs.
@@ -131,11 +136,13 @@ export function createCalls({
       case 'renegotiate':
         if (!call || call.state !== 'active' || (call.from !== me && call.to !== me)) return;
         if (typeof msg.sdp !== 'string' || (msg.kind !== 'offer' && msg.kind !== 'answer')) return;
-        send(other(call, me), call, 'renegotiate', { sdp: msg.sdp, kind: msg.kind });
+        if (call.v2.has(other(call, me))) send(other(call, me), call, 'renegotiate', { sdp: msg.sdp, kind: msg.kind });
         return;
       case 'media':
         if (!call || (call.from !== me && call.to !== me)) return;
-        send(other(call, me), call, 'media', { muted: Boolean(msg.muted), cameraOff: Boolean(msg.cameraOff) });
+        if (call.v2.has(other(call, me))) {
+          send(other(call, me), call, 'media', { muted: Boolean(msg.muted), cameraOff: Boolean(msg.cameraOff) });
+        }
         return;
       default:
     }

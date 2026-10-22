@@ -119,6 +119,8 @@ object CallManager {
     private var retryJob: Job? = null
     private var giveUpJob: Job? = null
     private const val GIVE_UP_MS = 30_000L
+    /** Tells the server this app understands "renegotiate" and "media" (see server/src/calls.js). */
+    private const val PROTOCOL = 2
     private val audio by lazy { CallAudio(app).apply { onHeadsetChange = { on -> if (on != _state.value.headset) set { it.copy(headset = on) } } } }
     private val proximity by lazy {
         app.getSystemService(PowerManager::class.java)
@@ -470,7 +472,7 @@ object CallManager {
                 val peerConnection = makePeer().also { pc = it }
                 val offer = peerConnection.create(offer = true)
                 peerConnection.apply(offer, local = true)
-                if (!signal("invite", mapOf("to" to peer.id, "video" to video, "sdp" to offer.description))) {
+                if (!signal("invite", mapOf("to" to peer.id, "video" to video, "sdp" to offer.description, "v" to PROTOCOL))) {
                     throw IllegalStateException("서버에 연결되어 있지 않아요.")
                 }
                 startRingback()
@@ -495,7 +497,7 @@ object CallManager {
                 flushCandidates()
                 val answer = peerConnection.create(offer = false)
                 peerConnection.apply(answer, local = true)
-                signal("accept", mapOf("sdp" to answer.description, "deviceId" to deviceId))
+                signal("accept", mapOf("sdp" to answer.description, "deviceId" to deviceId, "v" to PROTOCOL))
             } catch (e: Exception) {
                 signal("decline")
                 finish(e.message ?: "전화를 받을 수 없어요.")

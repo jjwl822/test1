@@ -224,7 +224,7 @@ export async function startCall(peer, video) {
     pc = await makePeer();
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    if (!signal('invite', { to: peer.id, video, sdp: offer.sdp })) throw new Error('서버에 연결되어 있지 않아요.');
+    if (!signal('invite', { to: peer.id, video, sdp: offer.sdp, v: 2 })) throw new Error('서버에 연결되어 있지 않아요.');
     startTone('outgoing');
   } catch (e) {
     finish(e.message);
@@ -243,7 +243,7 @@ export async function acceptCall() {
     await flushCandidates();
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-    signal('accept', { sdp: answer.sdp, deviceId });
+    signal('accept', { sdp: answer.sdp, deviceId, v: 2 });
   } catch (e) {
     signal('decline');
     finish(e.message);
