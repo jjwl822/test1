@@ -158,3 +158,26 @@ test('script errors from games are written to the error log', async () => {
   assert.deepEqual([line.user, line.game, line.message, line.where, line.ua], ['막내', 'quiz', 'x is not defined', 'quiz/index.html:10:5', 'TestPhone/1.0']);
   assert.equal((await fetch(`${base}/api/games/quiz/errors`, { method: 'POST' })).status, 401);
 });
+
+test('game saves are backed up per person and an older save never replaces a newer one', async () => {
+  const a = await reg('saver', '세이브');
+  const b = await reg('other', '다른 사람');
+  const put = (token, body, at) =>
+    fetch(`${base}/api/games/quiz/save?at=${at}`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'text/plain' },
+      body,
+    });
+
+  assert.deepEqual((await call(a.token, 'GET', '/api/games/quiz/save')).data, { data: null, savedAt: 0 });
+  assert.equal((await put(a.token, '{"lv":3}', 1000)).status, 204);
+  assert.equal((await put(a.token, '{"lv":1}', 500)).status, 204); // late, older copy is ignored
+  assert.deepEqual((await call(a.token, 'GET', '/api/games/quiz/save')).data, { data: '{"lv":3}', savedAt: 1000 });
+  assert.equal((await put(a.token, '{"lv":5}', 2000)).status, 204);
+  assert.equal((await call(a.token, 'GET', '/api/games/quiz/save')).data.data, '{"lv":5}');
+
+  assert.equal((await call(b.token, 'GET', '/api/games/quiz/save')).data.data, null); // each person has their own
+  assert.equal((await put(a.token, 'x', 1)).status, 204);
+  assert.equal((await fetch(`${base}/api/games/nope/save?at=1`, { method: 'PUT', headers: { authorization: `Bearer ${a.token}`, 'content-type': 'text/plain' }, body: 'x' })).status, 404);
+  assert.equal((await fetch(`${base}/api/games/quiz/save`)).status, 401);
+});

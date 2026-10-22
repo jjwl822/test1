@@ -492,6 +492,31 @@ const J=josa;
 const fmtTime=ms=>{const m=Math.floor(ms/60000);return Math.floor(m/60)+':'+String(m%60).padStart(2,'0');};
 function store(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true;}catch(e){return false;}}
 function load(k){try{const s=localStorage.getItem(k);return s?JSON.parse(s):null;}catch(e){return null;}}
+/* save backup on the family server: survives reinstalling the app, carries over between app and browser.
+   SKEY-at = when this phone last saved; whichever copy is newer wins. */
+const CLOUD='/api/games/luo/save';
+let cloudTimer=0;
+function savedAt(){ return +localStorage.getItem(SKEY+'-at')||0; }
+function cloudPush(){ clearTimeout(cloudTimer); cloudTimer=setTimeout(cloudFlush,1500); }
+function cloudFlush(){
+  clearTimeout(cloudTimer); cloudTimer=0;
+  try{ const s=localStorage.getItem(SKEY); if(!s) return;
+    fetch(CLOUD+'?at='+savedAt(),{method:'PUT',credentials:'same-origin',headers:{'content-type':'text/plain'},body:s,keepalive:s.length<60000}).catch(()=>{});
+  }catch(e){}
+}
+async function cloudPull(){
+  try{
+    // A save from before the backup existed counts as new, so it's uploaded rather than replaced.
+    if(localStorage.getItem(SKEY)&&!savedAt()) localStorage.setItem(SKEY+'-at',String(Date.now()));
+    const ac=new AbortController(),t=setTimeout(()=>ac.abort(),5000);
+    const r=await fetch(CLOUD,{credentials:'same-origin',signal:ac.signal}); clearTimeout(t);
+    if(!r.ok) return;
+    const c=await r.json(),local=localStorage.getItem(SKEY);
+    if(c.data&&(!local||c.savedAt>savedAt())){ localStorage.setItem(SKEY,c.data); localStorage.setItem(SKEY+'-at',String(c.savedAt)); }
+    else if(local&&c.savedAt<savedAt()) cloudFlush();
+  }catch(e){}
+}
+addEventListener('visibilitychange',()=>{ if(document.hidden&&cloudTimer) cloudFlush(); });
 
 /* =========================================================
    소리 · 배경음악
@@ -7833,7 +7858,11 @@ function serialize(){
   return {v:1,map:G.map,x:G.x,y:G.y,dir:G.dir,gold:G.gold,inv:G.inv,flags:G.flags,time:Math.round(G.time),enh:G.enh,got:G.got,dex:G.dex,bk:G.bk,
     party:G.party.map(m=>({id:m.id,name:m.name,lv:m.lv,exp:m.exp,hp:m.hp,mp:m.mp,eq:m.eq,cls:m.cls}))};
 }
-function saveGame(){ return G.started?store(SKEY,serialize()):false; }
+function saveGame(){
+  if(!G.started||!store(SKEY,serialize())) return false;
+  try{ localStorage.setItem(SKEY+'-at',String(Date.now())); }catch(e){}
+  cloudPush(); return true;
+}
 let autosaveWarned=false;
 function autosave(){ if(!saveGame()&&!autosaveWarned){ autosaveWarned=true; toast('이 브라우저에서는 저장할 수 없어요.',2600); } }
 function applySave(d){
@@ -7867,6 +7896,7 @@ async function toTitle(){
 }
 async function titleMenu(){
   G.mode='title'; titleEl.hidden=false; G.busy=true; playBgm('home');
+  await cloudPull();
   const w=makeWin('w-title');
   for(;;){
     const has=!!load(SKEY);

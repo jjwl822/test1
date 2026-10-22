@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import express from 'express';
 
 const ID = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 const CLIENT_ID = /^[A-Za-z0-9_-]{8,64}$/;
@@ -29,6 +30,13 @@ export function registerGameRoutes(app, { db, auth, gamesDir, errorLog, now = Da
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_game_scores_client ON game_scores(user_id, client_id) WHERE client_id IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_game_scores_recent ON game_scores(game, created_at);
+    CREATE TABLE IF NOT EXISTS game_saves (
+      game       TEXT NOT NULL,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      data       TEXT NOT NULL,
+      saved_at   INTEGER NOT NULL,
+      PRIMARY KEY (game, user_id)
+    );
   `);
 
   function readGames() {
@@ -106,6 +114,31 @@ export function registerGameRoutes(app, { db, auth, gamesDir, errorLog, now = Da
     const game = findGame(req.params.id);
     if (!game) return res.status(404).json({ error: '게임을 찾을 수 없습니다.' });
     res.json(board(game, req.user.id));
+  });
+
+  // Saved games are backed up per person, so progress survives reinstalling the app or a new phone,
+  // and carries over between the app and the browser. savedAt is when the phone saved it; the
+  // game keeps whichever copy is newer.
+  app.get('/api/games/:id/save', auth, (req, res) => {
+    if (!ID.test(req.params.id)) return res.status(404).json({ error: '게임을 찾을 수 없습니다.' });
+    const row = db.prepare('SELECT data, saved_at FROM game_saves WHERE game = ? AND user_id = ?').get(req.params.id, req.user.id);
+    res.json(row ? { data: row.data, savedAt: row.saved_at } : { data: null, savedAt: 0 });
+  });
+
+  app.put('/api/games/:id/save', auth, express.text({ type: 'text/plain', limit: '2mb' }), (req, res) => {
+    if (!ID.test(req.params.id) || !readGames().some((g) => g.id === req.params.id)) {
+      return res.status(404).json({ error: '게임을 찾을 수 없습니다.' });
+    }
+    const data = typeof req.body === 'string' ? req.body : '';
+    const savedAt = Math.min(Number(req.query.at) || now(), now());
+    if (!data) return res.status(400).json({ error: '저장할 내용이 없습니다.' });
+    // An older save arriving late (from another phone) never replaces a newer one.
+    db.prepare(
+      `INSERT INTO game_saves (game, user_id, data, saved_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT (game, user_id) DO UPDATE SET data = excluded.data, saved_at = excluded.saved_at
+       WHERE excluded.saved_at >= game_saves.saved_at`,
+    ).run(req.params.id, req.user.id, data, savedAt);
+    res.status(204).end();
   });
 
   // Script errors from games on family phones, so a game that breaks on one phone can be fixed.
