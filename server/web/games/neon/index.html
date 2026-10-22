@@ -403,14 +403,20 @@ function renderMenu(){
   c.onclick=e=>{selSong='custom';if(!e.target.closest('label'))renderMenu();};
   box.appendChild(c);
   $('#fileIn').onchange=loadFile;
-  $('#fileIn').onclick=e=>{e.stopPropagation();};
+  $('#fileIn').onclick=e=>{e.stopPropagation();nlog('file-click');};
   const dr=$('#diffs');dr.innerHTML='';
   DN.forEach((n,i)=>{const b=document.createElement('button');b.textContent=n;if(i===selDiff)b.className='sel';b.onclick=()=>{selDiff=i;renderMenu();};dr.appendChild(b);});
 }
 let actx=null;
 function getCtx(){if(!actx){const AC=window.AudioContext||window.webkitAudioContext;actx=new AC();}return actx;}
+/* TEMP: report each step of loading a song file to the server (debugging uploads that fail on phones) */
+function nlog(message,where){
+  try{fetch('/api/games/neon/errors',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},
+    body:JSON.stringify({message,where:String(where||'').slice(0,190)})}).catch(()=>{});}catch(e){}
+}
+const fdesc=f=>f.name+' | '+(f.type||'no type')+' | '+f.size+'B';
 async function loadFile(e){
-  const f=e.target.files[0];if(!f)return;
+  const f=e.target.files[0];nlog('file-picked',f?fdesc(f):'none');if(!f)return;
   selSong='custom';
   const st=$('#custStatus');st.textContent='분석 중...';
   try{
@@ -418,9 +424,10 @@ async function loadFile(e){
     const ctx=getCtx();
     const buf=await new Promise((res,rej)=>{const p=ctx.decodeAudioData(ab,res,rej);if(p&&p.then)p.then(res,rej);});
     custom.buf=buf;custom.onsets=analyze(buf);custom.name=f.name;
+    nlog('file-ok',f.name+' | '+Math.round(buf.duration)+'s | '+custom.onsets.length+' beats');
     renderMenu();
     $('#custStatus').textContent=`불러옴: ${f.name} (${Math.round(buf.duration)}초, 박자 ${custom.onsets.length}개 감지)`;
-  }catch(err){custom.buf=null;renderMenu();$('#custStatus').textContent='이 파일은 읽을 수 없어요. 다른 파일로 시도해 주세요.';}
+  }catch(err){nlog('file-fail',fdesc(f)+' | '+(err&&(err.name+': '+err.message)));custom.buf=null;renderMenu();$('#custStatus').textContent='이 파일은 읽을 수 없어요. 다른 파일로 시도해 주세요.';}
 }
 $('#sp').oninput=e=>$('#spv').textContent=(+e.target.value).toFixed(1);
 $('#of').oninput=e=>$('#ofv').textContent=e.target.value;
