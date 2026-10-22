@@ -27,6 +27,8 @@ class ChatViewModel(application: Application, private val conversationId: String
         val reads: Map<Long, Long> = emptyMap(),
         /** The message being replied to, shown above the input box. */
         val replyingTo: Message? = null,
+        /** Text whose sending failed, to put back in the input box so it can be sent again. */
+        val unsentText: String? = null,
     ) {
         /** How many people (other than the sender) haven't read [message] yet — the "1" in KakaoTalk. */
         fun unreadCount(message: Message): Int =
@@ -112,8 +114,21 @@ class ChatViewModel(application: Application, private val conversationId: String
     }
 
     fun sendText(text: String) {
-        val replyId = _state.value.replyingTo?.id
-        send { app.api.sendText(conversationId, text, replyId) }
+        val replyingTo = _state.value.replyingTo
+        send(
+            onFail = {
+                _state.value = _state.value.copy(
+                    unsentText = text,
+                    replyingTo = replyingTo,
+                    error = "${_state.value.error} 쓴 내용은 입력창에 다시 넣어 두었어요.",
+                )
+            },
+        ) { app.api.sendText(conversationId, text, replyingTo?.id) }
+    }
+
+    /** The screen took [State.unsentText] back into the input box. */
+    fun unsentTextRestored() {
+        _state.value = _state.value.copy(unsentText = null)
     }
 
     fun sendImage(uri: Uri) {
@@ -137,7 +152,7 @@ class ChatViewModel(application: Application, private val conversationId: String
         _state.value = _state.value.copy(error = null)
     }
 
-    private fun send(block: suspend () -> Message) = viewModelScope.launch {
+    private fun send(onFail: () -> Unit = {}, block: suspend () -> Message) = viewModelScope.launch {
         _state.value = _state.value.copy(sending = true, error = null, replyingTo = null)
         try {
             val message = block()
@@ -145,6 +160,7 @@ class ChatViewModel(application: Application, private val conversationId: String
             me?.let { updateRead(it, message.id) }
         } catch (e: Exception) {
             _state.value = _state.value.copy(error = e.message ?: "전송에 실패했습니다.")
+            onFail()
         } finally {
             _state.value = _state.value.copy(sending = false)
         }

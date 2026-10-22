@@ -116,6 +116,12 @@ fun ChatScreen(app: FamilyApp, conversationId: String, title: String, me: User, 
     val users by app.directory.users.collectAsStateWithLifecycle()
     val isGroup = conversationId == "family"
     var draft by rememberSaveable(conversationId) { mutableStateOf("") }
+    // A message that failed to send goes back into the input box, so one tap sends it again.
+    LaunchedEffect(state.unsentText) {
+        val unsent = state.unsentText ?: return@LaunchedEffect
+        draft = if (draft.isBlank()) unsent else "$unsent\n$draft"
+        viewModel.unsentTextRestored()
+    }
     var viewing by remember { mutableStateOf<String?>(null) }
     var actionsFor by remember { mutableStateOf<Message?>(null) }
     var attachMenu by remember { mutableStateOf(false) }

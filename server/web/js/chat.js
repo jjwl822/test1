@@ -170,18 +170,25 @@ export function ChatRoom({ id, title, me, onBack }) {
     }
   }
 
-  async function send(work) {
+  async function send(work, unsentText) {
     setSending(true);
     setError(null);
-    const target = replyTo?.id;
+    const replying = replyTo;
     setReplyTo(null);
     stickToBottom.current = true;
     try {
-      const m = await work(target);
+      const m = await work(replying?.id);
       merge([m]);
       setReads((r) => ({ ...r, [me.id]: Math.max(r[me.id] ?? 0, m.id) }));
     } catch (e) {
-      setError(e.message);
+      if (unsentText) {
+        // Put what was written back in the input box, so one tap sends it again.
+        setDraft((d) => (d.trim() ? `${unsentText}\n${d}` : unsentText));
+        setReplyTo(replying);
+        setError(`${e.message} 쓴 내용은 입력창에 다시 넣어 두었어요.`);
+      } else {
+        setError(e.message);
+      }
     } finally {
       setSending(false);
     }
@@ -196,7 +203,7 @@ export function ChatRoom({ id, title, me, onBack }) {
     const text = draft.trim();
     if (!text) return;
     setDraft('');
-    send((reply) => api.sendText(id, text, reply));
+    send((reply) => api.sendText(id, text, reply), text);
   }
 
   return html`<div class="screen">
