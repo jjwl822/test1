@@ -323,8 +323,38 @@ textarea.field { resize: none; min-height: 90px; }
 .call-info.over-video { align-self: flex-start; align-items: flex-start; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
 .call-info h2 { margin: 12px 0 0; font-size: 26px; }
 .call-info.over-video h2 { margin-top: 0; font-size: 20px; }
+/* Below the "작게 보기" button, and clear of my small picture in the top corner. */
+.call-info.over-video { margin-top: 24px; max-width: calc(100% - 140px); }
 .call-info p { margin: 0; opacity: .8; }
 .call-info .call-note { opacity: 1; font-size: 13px; padding: 4px 10px; border-radius: 12px; background: rgba(0,0,0,.45); }
+/* The small picture: any corner (drag it), tap to swap with the big one. */
+.call video.local { touch-action: none; cursor: grab; }
+.call video.local.c-tl { right: auto; left: 16px; }
+.call video.local.c-bl, .call video.local.c-br { top: auto; bottom: calc(env(safe-area-inset-bottom) + 200px); }
+.call video.local.c-bl { right: auto; left: 16px; }
+/* Buttons hide on a tap over the video (and by themselves after a few seconds). */
+.call .call-info, .call .call-actions, .call .call-top-btn, .call .call-scrim { transition: opacity .25s; }
+.call.controls-hidden .call-info, .call.controls-hidden .call-actions, .call.controls-hidden .call-top-btn, .call.controls-hidden .call-scrim { opacity: 0; pointer-events: none; }
+.call-scrim { position: absolute; left: 0; right: 0; z-index: 1; pointer-events: none; }
+.call-scrim.top { top: 0; height: 160px; background: linear-gradient(rgba(0,0,0,.5), transparent); }
+.call-scrim.bottom { bottom: 0; height: 240px; background: linear-gradient(transparent, rgba(0,0,0,.55)); }
+.call-top-btn { position: absolute; z-index: 3; top: calc(env(safe-area-inset-top) + 16px); left: 16px; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.2); color: #fff; }
+.call-top-btn svg { width: 22px; height: 22px; }
+.call-info .call-status { display: flex; align-items: center; gap: 8px; }
+.call-info .call-weak { opacity: 1; color: #ffd60a; font-size: 13px; }
+.bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+.bars i { width: 4px; border-radius: 1px; background: rgba(255,255,255,.3); }
+.bars i.on { background: #fff; }
+.bars.weak i.on { background: #ffd60a; }
+/* Rings spreading out from the photo while ringing / connecting. */
+.ripple { position: relative; display: grid; place-items: center; }
+.ripple.on::before, .ripple.on::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: rgba(255,255,255,.45); animation: ripple 2s linear infinite; z-index: -1; }
+.ripple.on::after { animation-delay: 1s; }
+@keyframes ripple { from { transform: scale(1); opacity: 1; } to { transform: scale(1.7); opacity: 0; } }
+/* Connection dropped: dim the picture with a spinner while it's restored. */
+.call-reconnect { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; background: rgba(0,0,0,.5); pointer-events: none; }
+.call-reconnect .spinner { width: 40px; height: 40px; border-width: 3px; border-color: rgba(255,255,255,.3); border-top-color: #fff; }
+@media (prefers-reduced-motion: reduce) { .ripple.on::before, .ripple.on::after { animation: none; } }
 .call-actions { position: relative; z-index: 1; display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; }
 .call-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; color: #fff; }
 .call-btn span { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; }

@@ -100,6 +100,7 @@ async function makePeer() {
       if (state.status !== 'active') {
         set({ status: 'active', startedAt: Date.now() });
         sendMedia();
+        startStats();
       } else if (state.reconnecting) set({ reconnecting: false });
     }
     if ((s === 'disconnected' || s === 'failed') && state.status === 'active') lostConnection(s === 'failed');
@@ -166,6 +167,47 @@ window.addEventListener('online', () => {
   if (state.status === 'active' && state.isCaller && pc?.connectionState !== 'connected') restartIce();
 });
 
+// ---- Connection quality ------------------------------------------------------------------------
+
+let statsTimer = null;
+let lastReceived = 0;
+let lastLost = 0;
+
+/** Every 2 seconds: how long a round trip takes and how much of the sound gets lost. */
+function startStats() {
+  stopStats();
+  lastReceived = 0;
+  lastLost = 0;
+  statsTimer = setInterval(measure, 2000);
+}
+
+function stopStats() {
+  clearInterval(statsTimer);
+  statsTimer = null;
+}
+
+async function measure() {
+  if (!pc) return;
+  let rtt = null;
+  let received = 0;
+  let lost = 0;
+  (await pc.getStats()).forEach((s) => {
+    if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded' && s.currentRoundTripTime != null) rtt = s.currentRoundTripTime;
+    if (s.type === 'inbound-rtp' && s.kind === 'audio') {
+      received += s.packetsReceived ?? 0;
+      lost += s.packetsLost ?? 0;
+    }
+  });
+  const newReceived = received - lastReceived;
+  const newLost = Math.max(0, lost - lastLost);
+  lastReceived = received;
+  lastLost = lost;
+  const loss = newReceived + newLost > 0 ? newLost / (newReceived + newLost) : 1;
+  const r = rtt ?? 1;
+  const quality = state.reconnecting ? 1 : r < 0.3 && loss < 0.03 ? 3 : r < 0.7 && loss < 0.1 ? 2 : 1;
+  if (quality !== state.quality) set({ quality });
+}
+
 /** Tells the other side whether my microphone / camera is off, so their screen can show it. */
 const sendMedia = () => signal('media', { muted: Boolean(state.muted), cameraOff: Boolean(state.cameraOff) });
 
@@ -183,6 +225,7 @@ async function flushCandidates() {
 function cleanup() {
   stopTone();
   stopRetrying();
+  stopStats();
   pc?.close();
   pc = null;
   localStream?.getTracks().forEach((t) => t.stop());
@@ -207,6 +250,7 @@ const fresh = () => ({
   peerMuted: false,
   peerCameraOff: false,
   reconnecting: false,
+  quality: 0,
   remoteStream: null,
   message: null,
   startedAt: null,
@@ -362,12 +406,37 @@ onLive('call', async (msg) => {
 
 // ---- Screen -------------------------------------------------------------------------------------
 
-function Video({ stream, muted, mirror, cls }) {
+function Video({ stream, muted, mirror, cls, remote, drag, ...handlers }) {
   const ref = useRef(null);
   useEffect(() => {
     if (ref.current && ref.current.srcObject !== stream) ref.current.srcObject = stream ?? null;
   }, [stream]);
-  return html`<video ref=${ref} class=${cls} autoplay playsinline muted=${muted} style=${mirror ? 'transform:scaleX(-1)' : ''}></video>`;
+  const transform = [drag && `translate(${drag.dx}px, ${drag.dy}px)`, mirror && 'scaleX(-1)'].filter(Boolean).join(' ');
+  return html`<video ref=${ref} class=${cls} autoplay playsinline muted=${muted} data-remote=${remote ? '1' : undefined}
+    style=${transform ? `transform:${transform}` : ''} ...${handlers}></video>`;
+}
+
+const pipSupported = () =>
+  typeof document !== 'undefined' && (document.pictureInPictureEnabled || 'webkitSetPresentationMode' in HTMLVideoElement.prototype);
+
+/** The other person's picture in a small floating window, over other apps / tabs. */
+async function togglePip() {
+  const v = document.querySelector('.call video[data-remote]');
+  if (!v) return;
+  try {
+    if (document.pictureInPictureElement) await document.exitPictureInPicture();
+    else if (v.requestPictureInPicture) await v.requestPictureInPicture();
+    else v.webkitSetPresentationMode?.(v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
+  } catch {
+    // not allowed right now
+  }
+}
+
+/** Signal bars for the connection: 3 good, 2 fair, 1 weak (0: not measured yet). */
+function QualityBars({ quality }) {
+  return html`<span class=${`bars ${quality === 1 ? 'weak' : ''}`} aria-label=${`연결 상태 ${quality}/3`}>
+    ${[1, 2, 3].map((i) => html`<i class=${quality >= i ? 'on' : ''} style=${`height:${4 + i * 3}px`}></i>`)}
+  </span>`;
 }
 
 function useClock(startedAt) {
@@ -393,8 +462,71 @@ function RoundButton({ icon, label, onClick, color = 'rgba(255,255,255,.18)', on
 export function CallScreen() {
   const call = useCall();
   const clock = useClock(call.status === 'active' ? call.startedAt : null);
+  const active = call.status === 'active';
+  // The other person's camera off: their photo instead of a black picture.
+  const showRemoteVideo = Boolean(call.video && call.remoteStream && active && !call.peerCameraOff);
+  const showLocal = Boolean(call.video && call.localStream && !call.cameraOff);
+
+  // Tapping my small picture swaps it with the big one; dragging moves it to another corner.
+  const [swapped, setSwapped] = useState(false);
+  const swap = swapped && showRemoteVideo && showLocal;
+  const [corner, setCorner] = useState('tr');
+  const [drag, setDrag] = useState(null);
+  const press = useRef(null);
+  // On a video call, tapping the picture hides the buttons; they also hide by themselves.
+  const [controls, setControls] = useState(true);
+  const [touched, setTouched] = useState(0);
+  useEffect(() => {
+    if (!showRemoteVideo) {
+      setControls(true);
+      return undefined;
+    }
+    if (!controls) return undefined;
+    const t = setTimeout(() => setControls(false), 5000);
+    return () => clearTimeout(t);
+  }, [showRemoteVideo, controls, touched]);
+
   if (call.status === 'idle') return null;
   const peer = call.peer ?? {};
+  const ringing = call.status === 'incoming' || call.status === 'outgoing' || call.status === 'connecting';
+  const isSmall = (el) => el.classList.contains('local');
+  const small = {
+    onPointerDown: (e) => {
+      if (!isSmall(e.currentTarget)) return;
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+      press.current = { x: e.clientX, y: e.clientY, moved: false };
+    },
+    onPointerMove: (e) => {
+      const p = press.current;
+      if (!p) return;
+      const dx = e.clientX - p.x;
+      const dy = e.clientY - p.y;
+      if (Math.hypot(dx, dy) > 6) p.moved = true;
+      if (p.moved) setDrag({ dx, dy });
+    },
+    onPointerUp: (e) => {
+      const p = press.current;
+      press.current = null;
+      if (!p) return;
+      setDrag(null);
+      if (!p.moved) {
+        if (showRemoteVideo) setSwapped((v) => !v);
+        return;
+      }
+      // Snaps to the nearest corner.
+      const r = e.currentTarget.getBoundingClientRect();
+      setCorner(`${r.top + r.height / 2 < innerHeight / 2 ? 't' : 'b'}${r.left + r.width / 2 < innerWidth / 2 ? 'l' : 'r'}`);
+    },
+  };
+  const onScreenTap = (e) => {
+    if (e.target.closest('button, video.local')) {
+      setTouched((n) => n + 1);
+      return;
+    }
+    if (!showRemoteVideo) return;
+    setControls((c) => !c);
+    setTouched((n) => n + 1);
+  };
   const statusText = {
     outgoing: call.message ?? '연결 중…',
     incoming: `${call.video ? '영상통화' : '음성통화'}가 왔어요`,
@@ -402,21 +534,31 @@ export function CallScreen() {
     active: call.reconnecting ? '연결이 불안정해요. 다시 연결하는 중…' : clock,
     ended: call.message,
   }[call.status];
-  // The other person's camera off: their photo instead of a black picture.
-  const showRemoteVideo = call.video && call.remoteStream && call.status === 'active' && !call.peerCameraOff;
-  const note = call.status === 'active' && [call.peerMuted && '🔇 상대방이 음소거했어요', call.video && call.peerCameraOff && '상대방이 카메라를 껐어요'].filter(Boolean).join(' · ');
+  const note = active && [call.peerMuted && '🔇 상대방이 음소거했어요', call.video && call.peerCameraOff && '상대방이 카메라를 껐어요'].filter(Boolean).join(' · ');
+  const smallCls = `local c-${corner}`;
+  // While reconnecting the status always shows.
+  const hidden = showRemoteVideo && !controls && !call.reconnecting;
 
-  return html`<div class="call">
-    ${call.remoteStream && html`<${Video} stream=${call.remoteStream} cls=${showRemoteVideo ? 'remote' : 'hidden'} />`}
-    ${call.video &&
-    call.localStream &&
-    !call.cameraOff &&
+  return html`<div class=${`call ${showRemoteVideo ? 'on-video' : ''} ${hidden ? 'controls-hidden' : ''}`} onClick=${onScreenTap}>
+    ${call.remoteStream &&
+    html`<${Video} stream=${call.remoteStream} remote cls=${!showRemoteVideo ? 'hidden' : swap ? smallCls : 'remote'}
+      drag=${swap ? drag : null} ...${small} />`}
+    ${showLocal &&
     // My camera fills the screen while ringing, then moves to the corner once connected.
-    html`<${Video} stream=${call.localStream} muted mirror cls=${call.status === 'active' ? 'local' : 'remote dim'} />`}
+    html`<${Video} stream=${call.localStream} muted mirror cls=${!active ? 'remote dim' : swap ? 'remote' : smallCls}
+      drag=${swap ? null : drag} ...${small} />`}
+    ${showRemoteVideo && html`<div class="call-scrim top"></div><div class="call-scrim bottom"></div>`}
+    ${call.reconnecting && html`<div class="call-reconnect"><span class="spinner"></span></div>`}
+    ${active && call.video && pipSupported() && showRemoteVideo &&
+    html`<button class="call-top-btn" aria-label="작게 보기" onClick=${togglePip}><${Icon} name="pip" /></button>`}
     <div class=${`call-info ${showRemoteVideo ? 'over-video' : ''}`}>
-      ${!showRemoteVideo && html`<${Avatar} name=${peer.displayName ?? ''} url=${avatarUrlOf(peer.id)} color=${colorOf(peer.id)} size=${120} ring />`}
+      ${!showRemoteVideo &&
+      html`<div class=${`ripple ${ringing ? 'on' : ''}`}>
+        <${Avatar} name=${peer.displayName ?? ''} url=${avatarUrlOf(peer.id)} color=${colorOf(peer.id)} size=${120} ring />
+      </div>`}
       <h2>${peer.displayName}</h2>
-      <p>${statusText}</p>
+      <p class="call-status">${active && !call.reconnecting && html`<${QualityBars} quality=${call.quality} />`}${statusText}</p>
+      ${active && call.quality === 1 && !call.reconnecting && html`<p class="call-weak">연결이 약해요</p>`}
       ${note && html`<p class="call-note">${note}</p>`}
     </div>
     <div class="call-actions">

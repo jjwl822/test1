@@ -46,6 +46,8 @@
         <activity
             android:name=".call.CallActivity"
             android:exported="false"
+            android:supportsPictureInPicture="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
             android:launchMode="singleTask"
             android:taskAffinity="com.family.messenger.call"
             android:excludeFromRecents="true" />

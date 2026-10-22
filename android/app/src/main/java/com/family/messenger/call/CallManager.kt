@@ -50,6 +50,7 @@ import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RTCStatsReport
 import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
@@ -76,9 +77,12 @@ object CallManager {
         val video: Boolean = false,
         val muted: Boolean = false,
         val cameraOff: Boolean = false,
-        val speaker: Boolean = false,
-        /** Sound is going to a Bluetooth / wired headset. */
-        val headset: Boolean = false,
+        /** Where the sound goes: earpiece, loudspeaker or a headset. */
+        val route: CallAudio.Route = CallAudio.Route.EARPIECE,
+        /** A Bluetooth / wired headset is connected (so it can be picked). */
+        val headsetAvailable: Boolean = false,
+        /** Connection quality while the call is up: 3 good, 2 fair, 1 weak, 0 unknown. */
+        val quality: Int = 0,
         val startedAt: Long? = null,
         val message: String? = null,
         /** The connection dropped (e.g. Wi-Fi → LTE) and is being restored. */
@@ -87,6 +91,7 @@ object CallManager {
         val peerCameraOff: Boolean = false,
     ) {
         val inCall: Boolean get() = status != Status.IDLE && status != Status.ENDED
+        val speaker: Boolean get() = route == CallAudio.Route.SPEAKER
     }
 
     private const val TAG = "CallManager"
@@ -121,7 +126,18 @@ object CallManager {
     private const val GIVE_UP_MS = 30_000L
     /** Tells the server this app understands "renegotiate" and "media" (see server/src/calls.js). */
     private const val PROTOCOL = 2
-    private val audio by lazy { CallAudio(app).apply { onHeadsetChange = { on -> if (on != _state.value.headset) set { it.copy(headset = on) } } } }
+    private val audio by lazy {
+        CallAudio(app).apply {
+            onChange = { route, available ->
+                val s = _state.value
+                if (s.route != route || s.headsetAvailable != available) set { it.copy(route = route, headsetAvailable = available) }
+            }
+        }
+    }
+    private var statsJob: Job? = null
+    /** Last audio packet counts, to work out the loss since the previous check. */
+    private var lastReceived = 0L
+    private var lastLost = 0L
     private val proximity by lazy {
         app.getSystemService(PowerManager::class.java)
             .takeIf { it.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK) }
@@ -155,7 +171,7 @@ object CallManager {
      */
     private fun updateProximity() {
         val s = _state.value
-        val atEar = !s.video && !s.speaker && !s.headset &&
+        val atEar = !s.video && s.route == CallAudio.Route.EARPIECE &&
             (s.status == Status.OUTGOING || s.status == Status.CONNECTING || s.status == Status.ACTIVE)
         val lock = proximity ?: return
         if (atEar && !lock.isHeld) lock.acquire(4 * 60 * 60 * 1000L)
@@ -270,6 +286,7 @@ object CallManager {
                             stopSounds()
                             set { it.copy(status = Status.ACTIVE, startedAt = System.currentTimeMillis(), message = null) }
                             sendMedia()
+                            startStats()
                         } else if (_state.value.reconnecting) {
                             set { it.copy(reconnecting = false) }
                         }
@@ -397,6 +414,54 @@ object CallManager {
         }.onFailure { Log.w(TAG, "renegotiate", it) }
     }
 
+    // ---- Connection quality ------------------------------------------------------------------
+
+    /** Every 2 seconds: how long a round trip takes and how much of the sound gets lost. */
+    private fun startStats() {
+        statsJob?.cancel()
+        lastReceived = 0
+        lastLost = 0
+        statsJob = scope.launch {
+            while (true) {
+                delay(2000)
+                measure()
+            }
+        }
+    }
+
+    private suspend fun measure() {
+        val peer = pc ?: return
+        val report = suspendCancellableCoroutine<RTCStatsReport> { cont -> peer.getStats { cont.resume(it) } }
+        var rtt: Double? = null
+        var received = 0L
+        var lost = 0L
+        for (s in report.statsMap.values) {
+            val m = s.members
+            when (s.type) {
+                "candidate-pair" -> if (m["nominated"] == true && m["state"] == "succeeded") {
+                    (m["currentRoundTripTime"] as? Number)?.let { rtt = it.toDouble() }
+                }
+                "inbound-rtp" -> if (m["kind"] == "audio") {
+                    received += (m["packetsReceived"] as? Number)?.toLong() ?: 0
+                    lost += (m["packetsLost"] as? Number)?.toLong() ?: 0
+                }
+            }
+        }
+        val newReceived = received - lastReceived
+        val newLost = (lost - lastLost).coerceAtLeast(0)
+        lastReceived = received
+        lastLost = lost
+        val loss = if (newReceived + newLost > 0) newLost.toDouble() / (newReceived + newLost) else 1.0
+        val r = rtt ?: 1.0
+        val quality = when {
+            _state.value.reconnecting -> 1
+            r < 0.3 && loss < 0.03 -> 3
+            r < 0.7 && loss < 0.1 -> 2
+            else -> 1
+        }
+        if (quality != _state.value.quality) set { it.copy(quality = quality) }
+    }
+
     /** Tells the other side whether my microphone / camera is off, so their screen can show it. */
     private fun sendMedia() {
         val s = _state.value
@@ -463,12 +528,13 @@ object CallManager {
         val callId = "${System.currentTimeMillis().toString(36)}-${(0..Int.MAX_VALUE).random().toString(36)}"
         isCaller = true
         // Video calls use the loudspeaker, unless a headset is connected.
-        val speaker = video && !audio.headsetConnected()
-        set { State(status = Status.OUTGOING, callId = callId, peer = peer, video = video, speaker = speaker) }
+        val preferred = if (video) CallAudio.Route.SPEAKER else CallAudio.Route.EARPIECE
+        val route = audio.initialRoute(preferred)
+        set { State(status = Status.OUTGOING, callId = callId, peer = peer, video = video, route = route) }
         scope.launch {
             try {
                 startMedia(video)
-                audio.start(speaker)
+                audio.start(route, fallback = preferred)
                 val peerConnection = makePeer().also { pc = it }
                 val offer = peerConnection.create(offer = true)
                 peerConnection.apply(offer, local = true)
@@ -486,12 +552,13 @@ object CallManager {
         if (_state.value.status != Status.INCOMING) return
         stopSounds()
         val video = _state.value.video
-        val speaker = video && !audio.headsetConnected()
-        set { it.copy(status = Status.CONNECTING, speaker = speaker) }
+        val preferred = if (video) CallAudio.Route.SPEAKER else CallAudio.Route.EARPIECE
+        val route = audio.initialRoute(preferred)
+        set { it.copy(status = Status.CONNECTING, route = route) }
         scope.launch {
             try {
                 startMedia(video)
-                audio.start(speaker)
+                audio.start(route, fallback = preferred)
                 val peerConnection = makePeer().also { pc = it }
                 peerConnection.apply(SessionDescription(SessionDescription.Type.OFFER, offerSdp), local = false)
                 flushCandidates()
@@ -539,10 +606,14 @@ object CallManager {
         capturer?.switchCamera(null)
     }
 
+    /** Earpiece ↔ loudspeaker (with no headset connected; otherwise the screen offers [setRoute]). */
     fun toggleSpeaker() {
-        val on = !_state.value.speaker
-        set { it.copy(speaker = on) }
-        audio.setSpeaker(on)
+        setRoute(if (_state.value.speaker) CallAudio.Route.EARPIECE else CallAudio.Route.SPEAKER)
+    }
+
+    fun setRoute(route: CallAudio.Route) {
+        set { it.copy(route = route) }
+        audio.setRoute(route)
     }
 
     private fun ring(callId: String, from: CallPeer, video: Boolean, sdp: String, candidates: List<JsonObject>) {
@@ -612,6 +683,8 @@ object CallManager {
     private fun finish(message: String) {
         stopSounds()
         stopRetrying()
+        statsJob?.cancel()
+        statsJob = null
         isCaller = false
         pc?.dispose()
         pc = null
