@@ -360,6 +360,26 @@ export function createServer({
     });
   }
 
+  // TEMP: app update downloads (debugging in-app updates that don't go through).
+  app.use('/app', (req, res, next) => {
+    const started = Date.now();
+    res.on('close', () => {
+      try {
+        const line = {
+          at: new Date().toISOString(),
+          path: req.originalUrl,
+          status: res.statusCode,
+          range: req.headers.range ?? null,
+          done: res.writableFinished,
+          ms: Date.now() - started,
+          ua: String(req.headers['user-agent'] ?? '').slice(0, 200),
+        };
+        fs.appendFileSync(path.join(dataDir, 'app-requests.log'), `${JSON.stringify(line)}\n`);
+      } catch {}
+    });
+    next();
+  });
+
   // TEMP: which phones load which game pages (debugging blank games in the Android app).
   app.use('/games', (req, res, next) => {
     res.on('finish', () => {

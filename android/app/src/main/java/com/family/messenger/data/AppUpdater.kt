@@ -74,7 +74,13 @@ class AppUpdater(private val context: Context, private val api: Api) {
         val url = api.url("/app/family.apk") + "?t=" + System.currentTimeMillis()
         val request = Request.Builder().url(url).apply { if (have > 0) header("Range", "bytes=$have-") }.build()
         api.client.newCall(request).execute().use { response ->
-            if (response.code == 416) return true // nothing left to fetch
+            // The saved part is as long as (or longer than) the file now on the server, which may be a
+            // different build, so start over rather than install a stale file.
+            if (response.code == 416) {
+                partFile.delete()
+                etagFile.delete()
+                return false
+            }
             if (response.code >= 500) throw IOException("server ${response.code}")
             if (!response.isSuccessful) throw ApiException("업데이트를 받을 수 없습니다. (${response.code})", response.code)
             val etag = response.header("ETag").orEmpty()
