@@ -79,6 +79,7 @@ export function ChatRoom({ id, title, me, onBack }) {
   const [replyTo, setReplyTo] = useState(null);
   const [sending, setSending] = useState(false);
   const [actionsFor, setActionsFor] = useState(null);
+  const [readersOf, setReadersOf] = useState(null);
   const [viewing, setViewing] = useState(null);
   const [attach, setAttach] = useState(false);
   const [composingPoll, setComposingPoll] = useState(false);
@@ -236,6 +237,7 @@ export function ChatRoom({ id, title, me, onBack }) {
               first=${first}
               showName=${isGroup && first && m.senderId !== me.id}
               unread=${unreadCount(m)}
+              onUnread=${() => setReadersOf(m)}
               onLongPress=${() => !m.deleted && setActionsFor(m)}
               onImage=${(url) => setViewing(url)}
               onReact=${(emoji) => update(() => api.reactMessage(m.id, emoji))}
@@ -308,6 +310,7 @@ export function ChatRoom({ id, title, me, onBack }) {
       onReply=${() => { setReplyTo(actionsFor); setActionsFor(null); }}
       onDelete=${() => { update(() => api.deleteMessage(actionsFor.id)); setActionsFor(null); }}
     />`}
+    ${readersOf && html`<${Readers} m=${readersOf} reads=${reads} onClose=${() => setReadersOf(null)} />`}
     ${composingPoll &&
     html`<${PollComposer}
       onClose=${() => setComposingPoll(false)}
@@ -317,7 +320,7 @@ export function ChatRoom({ id, title, me, onBack }) {
   </div>`;
 }
 
-function MessageRow({ m, me, first, showName, unread, onLongPress, onImage, onReact, onVote }) {
+function MessageRow({ m, me, first, showName, unread, onUnread, onLongPress, onImage, onReact, onVote }) {
   const mine = m.senderId === me.id;
   const press = longPress(onLongPress);
   // Every family member's messages appear in their own color, for everyone.
@@ -344,7 +347,7 @@ function MessageRow({ m, me, first, showName, unread, onLongPress, onImage, onRe
       <div class="line">
         ${bubble}
         <div class="meta">
-          ${unread > 0 && !m.deleted && html`<span class="unread">${unread}</span>`}
+          ${unread > 0 && !m.deleted && html`<button class="unread" onClick=${onUnread} aria-label="읽은 사람 보기">${unread}</button>`}
           <span>${timeOf(m.createdAt)}</span>
         </div>
       </div>
@@ -416,6 +419,24 @@ function MessageActions({ m, me, onClose, onReact, onReply, onDelete }) {
       <${Icon} name="copy" /> 복사
     </button>`}
     ${m.senderId === me.id && html`<button class="sheet-item danger" onClick=${() => setConfirm(true)}><${Icon} name="trash" /> 삭제</button>`}
+  <//>`;
+}
+
+/** Who has and hasn't read a message (opened by tapping its unread number). */
+function Readers({ m, reads, onClose }) {
+  const store = useStore();
+  const others = Object.entries(reads)
+    .map(([userId, last]) => ({ id: Number(userId), last }))
+    .filter((r) => r.id !== m.senderId);
+  const person = (r) => {
+    const name = store.user(r.id)?.displayName ?? '알 수 없음';
+    return html`<div class="sheet-item"><${Avatar} name=${name} url=${avatarUrlOf(r.id)} color=${colorOf(r.id)} size=${32} /> ${name}</div>`;
+  };
+  const group = (label, list) => html`<div class="small bold muted" style="padding:10px 20px 2px">${label} ${list.length}</div>
+    ${list.map(person)}`;
+  return html`<${Sheet} onClose=${onClose}>
+    ${group('안 읽음', others.filter((r) => r.last < m.id))}
+    ${group('읽음', others.filter((r) => r.last >= m.id))}
   <//>`;
 }
 

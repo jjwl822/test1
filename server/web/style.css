@@ -198,7 +198,7 @@ textarea.field { resize: none; min-height: 90px; }
 .msg.mine .line { flex-direction: row-reverse; }
 .meta { display: flex; flex-direction: column; font-size: 10.5px; color: var(--muted); white-space: nowrap; }
 .msg.mine .meta { align-items: flex-end; }
-.meta .unread { color: var(--blue); font-weight: 700; }
+.meta .unread { color: var(--blue); font-weight: 700; padding: 6px 4px; margin: -6px -4px; font-size: inherit; }
 .bubble {
   padding: 8px 13px; border-radius: 20px; background: var(--fill); white-space: pre-wrap; word-break: break-word;
   -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;

@@ -124,6 +124,7 @@ fun ChatScreen(app: FamilyApp, conversationId: String, title: String, me: User, 
     }
     var viewing by remember { mutableStateOf<String?>(null) }
     var actionsFor by remember { mutableStateOf<Message?>(null) }
+    var readersOf by remember { mutableStateOf<Message?>(null) }
     var attachMenu by remember { mutableStateOf(false) }
     var composingPoll by rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
@@ -212,6 +213,7 @@ fun ChatScreen(app: FamilyApp, conversationId: String, title: String, me: User, 
                             // Every family member's messages show in their own color, for everyone.
                             color = bubbleColor(users[message.senderId]?.color),
                             unread = state.unreadCount(message),
+                            onUnreadClick = { readersOf = message },
                             me = me,
                             imageUrl = message.imageUrl?.let(app.api::url),
                             onImageClick = { viewing = it },
@@ -299,6 +301,10 @@ fun ChatScreen(app: FamilyApp, conversationId: String, title: String, me: User, 
         }
     }
 
+    readersOf?.let { message ->
+        Readers(app, message, state.reads, users, onDismiss = { readersOf = null })
+    }
+
     actionsFor?.let { message ->
         MessageActions(
             message = message,
@@ -370,6 +376,7 @@ private fun MessageRow(
     senderName: String,
     color: Color,
     unread: Int,
+    onUnreadClick: () -> Unit,
     me: User,
     imageUrl: String?,
     onImageClick: (String) -> Unit,
@@ -402,7 +409,7 @@ private fun MessageRow(
                 )
             }
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (mine) Meta(message, unread, alignEnd = true)
+                if (mine) Meta(message, unread, onUnreadClick, alignEnd = true)
                 val bubbleModifier = Modifier.combinedClickable(
                     onClick = { if (imageUrl != null) onImageClick(imageUrl) },
                     onLongClick = onLongPress,
@@ -413,7 +420,7 @@ private fun MessageRow(
                     imageUrl != null -> ImageBubble(message, imageUrl, mine, bubbleModifier)
                     else -> TextBubble(message, color, bubbleModifier)
                 }
-                if (!mine) Meta(message, unread, alignEnd = false)
+                if (!mine) Meta(message, unread, onUnreadClick, alignEnd = false)
             }
             if (message.reactions.isNotEmpty()) {
                 Row(
@@ -446,9 +453,9 @@ private fun MessageRow(
     }
 }
 
-/** Time, and how many haven't read it yet (like KakaoTalk's "1"). */
+/** Time, and how many haven't read it yet (like KakaoTalk's "1"); tapping the number shows who. */
 @Composable
-private fun Meta(message: Message, unread: Int, alignEnd: Boolean) {
+private fun Meta(message: Message, unread: Int, onUnreadClick: () -> Unit, alignEnd: Boolean) {
     Column(horizontalAlignment = if (alignEnd) Alignment.End else Alignment.Start) {
         if (unread > 0 && !message.deleted) {
             Text(
@@ -456,6 +463,10 @@ private fun Meta(message: Message, unread: Int, alignEnd: Boolean) {
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onUnreadClick)
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
             )
         }
         Text(
@@ -612,6 +623,36 @@ private fun ReplyBar(name: String, preview: String, onCancel: () -> Unit) {
 }
 
 /** Long-press menu: emoji reactions on top, then reply / copy / delete. */
+/** Who has and hasn't read a message. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun Readers(app: FamilyApp, message: Message, reads: Map<Long, Long>, users: Map<Long, User>, onDismiss: () -> Unit) {
+    val others = reads.filterKeys { it != message.senderId }
+    val (read, unread) = others.entries.partition { it.value >= message.id }
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.navigationBarsPadding().padding(bottom = 8.dp).verticalScroll(rememberScrollState())) {
+            listOf("안 읽음" to unread, "읽음" to read).forEach { (label, list) ->
+                Text(
+                    "$label ${list.size}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                list.forEach { (userId, _) ->
+                    val user = users[userId]
+                    val name = user?.displayName ?: "알 수 없음"
+                    ListItem(
+                        headlineContent = { Text(name) },
+                        leadingContent = {
+                            Avatar(name, size = 36.dp, imageUrl = app.avatarUrl(user), color = bubbleColor(user?.color))
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MessageActions(
