@@ -12,6 +12,7 @@ import { registerFamilyRoutes } from './family.js';
 import { createHomework } from './homework.js';
 import { registerFeedRoutes } from './feed.js';
 import { registerGameRoutes } from './games.js';
+import { registerSongRoutes } from './songs.js';
 import { createRace, registerRaceRoutes } from './race.js';
 import { createPush } from './push.js';
 
@@ -331,6 +332,7 @@ export function createServer({
   });
   registerFeedRoutes(app, { db, auth, broadcastAll, saveFile, uploadDir, mediaTypes: Object.keys(MEDIA_TYPES), now, notify });
   registerGameRoutes(app, { db, auth, gamesDir, errorLog: path.join(dataDir, 'game-errors.log') });
+  registerSongRoutes(app, { db, auth, dataDir });
   const race = createRace({ db });
   registerRaceRoutes(app, { auth, race });
   const family = registerFamilyRoutes(app, {

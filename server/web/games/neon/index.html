@@ -40,6 +40,19 @@ button.alt{background:#1a1f3d;box-shadow:none;border:1.5px solid #2a2f55}
 .res td{padding:5px 8px;border-bottom:1px solid #1d2145;font-size:15px}
 .res td:last-child{text-align:right;font-weight:700}
 #custStatus{font-size:12px;color:#7fe;margin-top:6px}
+label.pick{display:inline-block;margin:6px 0 0;padding:8px 12px;border:1.5px solid #00e5ff;border-radius:10px;color:#00e5ff;font-weight:700;cursor:pointer}
+.shead{grid-column:1/-1;margin:10px 2px 0;font-size:14px;font-weight:700;color:#9ef}
+.sform{margin-top:8px}
+.sform input.stitle{width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid #2a2f55;background:#05060f;color:#fff;font-size:16px;-webkit-user-select:text;user-select:text}
+.slv{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin:8px 0}
+.slv button{padding:6px 2px;border-radius:8px;border:1.5px solid #2a2f55;background:#0b0e22;color:#ffd54f;font-size:12px;line-height:1.3}
+.slv button small{display:block;color:#9aa;font-size:10px}
+.slv button.sel{border-color:#ff3d9a;background:#2a0f25}
+.sbtn{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.sbtn button{padding:8px 12px;border-radius:10px;border:1.5px solid #2a2f55;background:#1a1f3d;color:#fff;font-weight:700;font-size:13px}
+.sbtn button.ok{border-color:#00e5ff;color:#00e5ff}
+.sbtn button.del{border-color:#ff5252;color:#ff8a80}
+.smsg{margin-top:6px;font-size:12px;color:#ff8a80}
 #loading{z-index:20;align-items:center;font-size:20px;font-weight:700;text-align:center}
 .fam{border:1.5px solid #2a2f55;border-radius:14px;padding:10px 12px;margin:10px 0;background:#0b0e22;text-align:left}
 .fam h3{margin:0 0 2px;font-size:14px;color:#9ef;letter-spacing:1px}
@@ -351,9 +364,9 @@ function analyze(buf){
   }
   return out;
 }
-function chartCustom(on,diff){
+function chartCustom(on,diff,level=3){
   if(!on.length)return[];
-  const R=rng(12345+diff),gap=[.5,.3,.18][diff],kept=[];
+  const R=rng(12345+diff),k=[1.5,1.25,1,.85,.72][level-1]||1,more=1/k,gap=[.5,.3,.18][diff]*k,kept=[];
   const sm=on.map(o=>o.s).sort((a,b)=>a-b),med=sm[sm.length>>1]||1,mean=sm.reduce((a,b)=>a+b,0)/sm.length;
   for(const o of on){
     if(diff==0&&o.s<med*1.1)continue;
@@ -372,10 +385,10 @@ function chartCustom(on,diff){
     let type='tap',end=0;
     const gp=nx?nx.t-t:0;
     if(diff>=1&&gp>.9&&o.s>mean&&R()<.5){type='hold';end=t+Math.min(gp-.3,1.4);}
-    else if(R()<[0,.05,.1][diff])type='flick';
+    else if(R()<[0,.05,.1][diff]*more)type='flick';
     notes.push({t,lane,type,end,st:0});last=lane;
     busy[lane]=type=='hold'?end+.1:t+.08;if(type=='hold')busy[lane^1]=Math.max(busy[lane^1],end+.1);
-    if(type!=='hold'&&o.s>mean*2&&R()<[0,.35,.55][diff]){
+    if(type!=='hold'&&o.s>mean*2&&R()<Math.min(.8,[0,.35,.55][diff]*more)){
       const l2=[(lane+2)%4,(lane+1)%4,(lane+3)%4].find(l=>busy[l]<=t&&l!==lane);
       if(l2!==undefined){notes.push({t,lane:l2,type:'tap',end:0,st:0});busy[l2]=t+.08;}
     }
@@ -384,24 +397,87 @@ function chartCustom(on,diff){
 }
 
 /* ================= 메뉴 ================= */
-let selSong=0,selDiff=1,custom={buf:null,onsets:null,name:''};
+let selSong=0,selDiff=1,custom={buf:null,onsets:null,name:'',file:null,title:'',level:3,busy:false,msg:''};
 const DN=['EASY','NORMAL','HARD'];
+const LVC=['#2e7d32','#558b2f','#f9a825','#ef6c00','#d84315','#c62828','#ad1457','#6a1b9a','#4527a0','#283593','#0d47a1','#000'];
+const LV_NAME=['아주 쉬움','쉬움','보통','어려움','아주 어려움'];
 const best=(id,d)=>{try{return +localStorage.getItem('nt4_'+id+d)||0;}catch(e){return 0;}};
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const lvBadge=lv=>`<span class="lv" style="background:${LVC[Math.min(lv,12)-1]}">Lv.${lv}</span>`;
+const bestLine=b=>b?`<div class="s">BEST ${String(b).padStart(7,'0')}</div>`:'';
+
+/* 가족이 올린 곡: 서버(data/songs)에 저장, 가족 모두 플레이. 난이도(★1~5)는 올린 사람이 정하고 노트 밀도에 반영 */
+let famSongs=[],famErr='',editing=null;
+const famCache=new Map();
+async function loadSongs(){
+  try{const r=await fetch('/api/games/neon/songs',{credentials:'same-origin',cache:'no-store'});if(!r.ok)throw new Error(r.status);famSongs=await r.json();famErr='';}
+  catch(e){famErr='가족이 올린 곡을 불러오지 못했어요.';}
+  renderMenu();
+}
+async function songApi(method,path,body,type){
+  const r=await fetch(path,{method,credentials:'same-origin',headers:body?{'content-type':type||'application/json'}:{},body:body&&!type?JSON.stringify(body):body});
+  let d=null;try{d=await r.json();}catch(e){}
+  if(!r.ok)throw new Error((d&&d.error)||(r.status===413?'파일이 너무 커요.':'서버에 연결할 수 없어요.'));
+  return d;
+}
+/* 제목 + 난이도 입력칸. st는 {title,level,msg} */
+function songForm(st,buttons){
+  return `<div class="sform"><input type="text" class="stitle" maxlength="40" placeholder="곡 제목" value="${esc(st.title)}">
+  <div class="slv">${LV_NAME.map((n,i)=>`<button data-lv="${i+1}" class="${st.level===i+1?'sel':''}">${'★'.repeat(i+1)}<small>${n}</small></button>`).join('')}</div>
+  <div class="sbtn">${buttons}</div>${st.msg?`<div class="smsg">${esc(st.msg)}</div>`:''}</div>`;
+}
+function bindForm(card,st){
+  const t=card.querySelector('.stitle');if(t)t.oninput=()=>{st.title=t.value;};
+  card.querySelectorAll('.slv button').forEach(b=>b.onclick=()=>{st.level=+b.dataset.lv;renderMenu();});
+}
 function renderMenu(){
   const box=$('#songs');box.innerHTML='';
   SONGS.forEach((s,i)=>{
     const d=document.createElement('div');d.className='card'+(selSong===i?' sel':'');
-    const b=best(s.id,selDiff);
-    const lv=s.tier+selDiff*3;
-    d.innerHTML=`<div class="t"><span class="lv" style="background:${['#2e7d32','#558b2f','#f9a825','#ef6c00','#d84315','#c62828','#ad1457','#6a1b9a','#4527a0','#283593','#0d47a1','#000'][lv-1]}">Lv.${lv}</span>${s.name}</div><div class="m">${s.genre} · ${s.bpm} BPM</div>${b?`<div class="s">BEST ${String(b).padStart(7,'0')}</div>`:''}`;
+    d.innerHTML=`<div class="t">${lvBadge(s.tier+selDiff*3)}${s.name}</div><div class="m">${s.genre} · ${s.bpm} BPM</div>${bestLine(best(s.id,selDiff))}`;
     d.onclick=()=>{selSong=i;renderMenu();};box.appendChild(d);
   });
+  const h=document.createElement('div');h.className='shead';
+  h.textContent=famErr||(famSongs.length?'👨‍👩‍👧 가족이 올린 곡':'👨‍👩‍👧 가족이 올린 곡이 아직 없어요. 아래에서 첫 곡을 등록해 보세요!');
+  box.appendChild(h);
+  famSongs.forEach(s=>{
+    const key='f'+s.id,ed=editing&&editing.id===s.id,d=document.createElement('div');
+    d.className='card'+(selSong===key?' sel':'')+(ed?' wide':'');
+    let html=`<div class="t">${lvBadge(s.level+selDiff*3)}${esc(s.title)}</div><div class="m">${esc(s.uploaderName)} · ${'★'.repeat(s.level)} ${LV_NAME[s.level-1]}</div>${bestLine(best('u'+s.id,selDiff))}`;
+    if(ed)html+=songForm(editing,`<button class="ok" data-a="save">저장</button><button data-a="cancel">취소</button><button class="del" data-a="del">${editing.confirmDel?'정말 삭제할까요?':'삭제'}</button>`);
+    else if(s.mine)html+=`<div class="sbtn"><button data-a="edit">✏️ 제목·난이도 바꾸기</button></div>`;
+    d.innerHTML=html;
+    d.onclick=e=>{if(e.target.closest('input,button'))return;selSong=key;renderMenu();};
+    const act=a=>d.querySelector(`[data-a="${a}"]`);
+    if(act('edit'))act('edit').onclick=()=>{editing={id:s.id,title:s.title,level:s.level,msg:''};selSong=key;renderMenu();};
+    if(ed){
+      bindForm(d,editing);
+      act('cancel').onclick=()=>{editing=null;renderMenu();};
+      act('save').onclick=async()=>{
+        if(!editing.title.trim()){editing.msg='제목을 입력해 주세요.';return renderMenu();}
+        try{await songApi('PATCH','/api/games/neon/songs/'+s.id,{title:editing.title,level:editing.level});editing=null;loadSongs();}
+        catch(err){editing.msg=err.message;renderMenu();}
+      };
+      act('del').onclick=async()=>{
+        if(!editing.confirmDel){editing.confirmDel=true;return renderMenu();}
+        try{await songApi('DELETE','/api/games/neon/songs/'+s.id);editing=null;if(selSong===key)selSong=0;loadSongs();}
+        catch(err){editing.msg=err.message;renderMenu();}
+      };
+    }
+    box.appendChild(d);
+  });
   const c=document.createElement('div');c.className='card wide'+(selSong==='custom'?' sel':'');
-  c.innerHTML=`<div class="t">🎵 내 곡 만들기</div><div class="m">기기에 있는 mp3 / m4a / wav 파일을 불러오면 박자를 자동 분석해 노트를 만들어요.<br>※ Spotify는 저작권 보호(DRM) 때문에 앱에서 직접 연결이 불가능해요. 파일로 가지고 있는 곡만 쓸 수 있어요.</div>
-  <div class="s"><label style="display:inline-block;margin:6px 0 0;padding:8px 12px;border:1.5px solid #00e5ff;border-radius:10px;color:#00e5ff;font-weight:700;cursor:pointer">파일 선택<input type="file" id="fileIn" accept="audio/*" style="display:none"></label></div>
-  <div id="custStatus">${custom.buf?'불러옴: '+custom.name:''}</div>`;
-  c.onclick=e=>{selSong='custom';if(!e.target.closest('label'))renderMenu();};
+  c.innerHTML=`<div class="t">🎵 내 곡 등록하기</div><div class="m">기기에 있는 mp3 / m4a / wav 파일을 고르고 제목과 난이도를 정해 등록하면 가족 모두 플레이할 수 있어요. 박자는 자동으로 분석해 노트를 만들어요.<br>※ Spotify는 저작권 보호(DRM) 때문에 직접 연결이 불가능해요. 파일로 가지고 있는 곡만 쓸 수 있어요.</div>
+  <div class="s"><label class="pick">파일 선택<input type="file" id="fileIn" accept="audio/*" style="display:none"></label></div>
+  <div id="custStatus">${custom.buf?`불러옴: ${esc(custom.name)} (${Math.round(custom.buf.duration)}초, 박자 ${custom.onsets.length}개)`:''}</div>
+  ${custom.buf?songForm(custom,`<button class="ok" data-a="up"${custom.busy?' disabled':''}>${custom.busy?'올리는 중…':'⬆ 가족에게 등록'}</button><button data-a="try">등록 안 하고 해보기</button>`):''}`;
+  c.onclick=e=>{if(e.target.closest('label,input,button'))return;selSong='custom';renderMenu();};
   box.appendChild(c);
+  if(custom.buf){
+    bindForm(c,custom);
+    c.querySelector('[data-a="up"]').onclick=uploadSong;
+    c.querySelector('[data-a="try"]').onclick=()=>{selSong='custom';startGame();};
+  }
   $('#fileIn').onchange=loadFile;
   $('#fileIn').onclick=e=>{e.stopPropagation();nlog('file-click');};
   const dr=$('#diffs');dr.innerHTML='';
@@ -415,23 +491,46 @@ function nlog(message,where){
     body:JSON.stringify({message,where:String(where||'').slice(0,190)})}).catch(()=>{});}catch(e){}
 }
 const fdesc=f=>f.name+' | '+(f.type||'no type')+' | '+f.size+'B';
+const decode=ab=>new Promise((res,rej)=>{const p=getCtx().decodeAudioData(ab,res,rej);if(p&&p.then)p.then(res,rej);});
+/* 일부 폰은 파일 종류(type)를 비워 보내서 확장자로 채움 */
+const EXT_TYPE={mp3:'audio/mpeg',m4a:'audio/mp4',mp4:'audio/mp4',aac:'audio/aac',wav:'audio/wav',ogg:'audio/ogg',oga:'audio/ogg',webm:'audio/webm',flac:'audio/flac'};
+const audioType=f=>(f.type&&f.type.startsWith('audio/')?f.type:EXT_TYPE[(f.name.split('.').pop()||'').toLowerCase()])||'';
 async function loadFile(e){
   const f=e.target.files[0];nlog('file-picked',f?fdesc(f):'none');if(!f)return;
   selSong='custom';
   const st=$('#custStatus');st.textContent='분석 중...';
   try{
-    const ab=await f.arrayBuffer();
-    const ctx=getCtx();
-    const buf=await new Promise((res,rej)=>{const p=ctx.decodeAudioData(ab,res,rej);if(p&&p.then)p.then(res,rej);});
-    custom.buf=buf;custom.onsets=analyze(buf);custom.name=f.name;
+    const buf=await decode(await f.arrayBuffer());
+    Object.assign(custom,{buf,onsets:analyze(buf),name:f.name,file:f,title:f.name.replace(/\.[^.]+$/,'').slice(0,40),level:3,busy:false,msg:''});
     nlog('file-ok',f.name+' | '+Math.round(buf.duration)+'s | '+custom.onsets.length+' beats');
     renderMenu();
-    $('#custStatus').textContent=`불러옴: ${f.name} (${Math.round(buf.duration)}초, 박자 ${custom.onsets.length}개 감지)`;
   }catch(err){nlog('file-fail',fdesc(f)+' | '+(err&&(err.name+': '+err.message)));custom.buf=null;renderMenu();$('#custStatus').textContent='이 파일은 읽을 수 없어요. 다른 파일로 시도해 주세요.';}
+}
+async function uploadSong(){
+  if(custom.busy)return;
+  const f=custom.file,type=audioType(f);
+  if(!custom.title.trim()){custom.msg='제목을 입력해 주세요.';return renderMenu();}
+  if(!type){custom.msg='이 파일 종류는 등록할 수 없어요. mp3 / m4a / wav 파일을 골라 주세요.';return renderMenu();}
+  if(f.size>40*1024*1024){custom.msg='파일이 너무 커요 (40MB까지).';return renderMenu();}
+  custom.busy=true;custom.msg='';renderMenu();
+  try{
+    const s=await songApi('POST','/api/games/neon/songs?'+new URLSearchParams({title:custom.title,level:custom.level}),f,type);
+    nlog('song-uploaded',s.id+' | '+fdesc(f));
+    famCache.set(s.id,{buf:custom.buf,onsets:custom.onsets});
+    custom={buf:null,onsets:null,name:'',file:null,title:'',level:3,busy:false,msg:''};
+    selSong='f'+s.id;await loadSongs();
+  }catch(err){nlog('song-upload-fail',fdesc(f)+' | '+err.message);custom.busy=false;custom.msg=err.message;renderMenu();}
+}
+/* 가족 곡은 처음 플레이할 때 받아서 분석하고, 그다음부터는 메모리에 둠 */
+async function famAudio(s){
+  if(famCache.has(s.id))return famCache.get(s.id);
+  const r=await fetch(s.url,{credentials:'same-origin'});if(!r.ok)throw new Error('곡 파일을 받지 못했어요.');
+  const buf=await decode(await r.arrayBuffer()),v={buf,onsets:analyze(buf)};
+  famCache.set(s.id,v);return v;
 }
 $('#sp').oninput=e=>$('#spv').textContent=(+e.target.value).toFixed(1);
 $('#of').oninput=e=>$('#ofv').textContent=e.target.value;
-renderMenu();
+renderMenu();loadSongs();
 
 /* ================= 게임 ================= */
 let G=null,raf=0;
@@ -449,9 +548,19 @@ async function startGame(){
   const ctx=getCtx();try{await ctx.resume();}catch(e){}
   let buf,notes,title,bpm=0,id;
   if(selSong==='custom'){
-    if(!custom.buf){alert('먼저 "내 곡 만들기"에서 곡 파일을 불러와 주세요.');return;}
-    buf=custom.buf;notes=chartCustom(custom.onsets,selDiff);title=custom.name.replace(/\.[^.]+$/,'');id='custom';
+    if(!custom.buf){alert('먼저 "내 곡 등록하기"에서 곡 파일을 불러와 주세요.');return;}
+    buf=custom.buf;notes=chartCustom(custom.onsets,selDiff,custom.level);title=(custom.title.trim()||custom.name.replace(/\.[^.]+$/,''));id='custom';
     if(notes.length<8){alert('이 곡에서는 노트를 충분히 만들지 못했어요. 다른 곡이나 난이도를 선택해 주세요.');return;}
+  }else if(typeof selSong==='string'){
+    const s=famSongs.find(x=>'f'+x.id===selSong);
+    if(!s){selSong=0;renderMenu();return;}
+    let a;
+    $('#loadTxt').textContent='곡 받는 중...';show('#loading',true);
+    try{a=await famAudio(s);}
+    catch(err){$('#loadTxt').textContent=err.message||'곡을 불러오지 못했어요.';setTimeout(()=>show('#loading',false),2000);return;}
+    show('#loading',false);
+    buf=a.buf;notes=chartCustom(a.onsets,selDiff,s.level);title=s.title;id='u'+s.id;
+    if(notes.length<8){alert('이 곡에서는 노트를 충분히 만들지 못했어요. 다른 난이도를 선택해 주세요.');return;}
   }else{
     const song=SONGS[selSong];
     notes=chartBuiltin(song,selDiff);title=song.name;bpm=song.bpm;id=song.id;
